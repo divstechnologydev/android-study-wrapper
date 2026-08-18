@@ -45,11 +45,24 @@ object DebugHooks {
             // otherwise the value is consumed at WebView creation.
             model.browser?.load(it)
         }
+        intent.getStringExtra("MOVEO_EVENT_SPY")?.let {
+            EventSpy.extraEnabled = it == "1"
+        }
+        intent.getStringExtra("MOVEO_INGEST_OVERRIDE")?.takeIf { it.isNotEmpty() }?.let {
+            model.ingestOverride = it
+        }
         intent.getStringExtra("MOVEO_AUTO_CODE")?.takeIf { it.isNotEmpty() }?.let { code ->
             model.codeInput.value = code
             model.activate()
         }
     }
+
+    /// M5 event spy (§a3.1): the spy user script (null when disabled) and
+    /// its separate "moveoDebug" bridge. Both no-ops in release.
+    fun eventSpyScript(): String? = EventSpy.script()
+
+    fun installEventSpyBridge(webView: android.webkit.WebView, rules: Set<String>) =
+        EventSpy.installBridge(webView, rules)
 
     /// DEBUG ingest redirect (§a2.7): rewrites the tag's fetch URLs so dev
     /// studies' events reach the dev ingestion host. Where events should be

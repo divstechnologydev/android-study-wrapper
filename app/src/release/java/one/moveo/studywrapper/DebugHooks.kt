@@ -18,6 +18,11 @@ object DebugHooks {
     @Suppress("UNUSED_PARAMETER")
     fun ingestRedirectScript(model: AppViewModel): String? = null
 
+    fun eventSpyScript(): String? = null
+
+    @Suppress("UNUSED_PARAMETER")
+    fun installEventSpyBridge(webView: android.webkit.WebView, rules: Set<String>) = Unit
+
     @Composable
     @Suppress("UNUSED_PARAMETER")
     fun DebugGearOverlay(model: AppViewModel) = Unit

@@ -13,14 +13,17 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
@@ -103,6 +106,41 @@ fun DebugSettingsScreen(model: AppViewModel, onDone: () -> Unit) {
         BrandEyebrow("Tag health")
         val tagHost = model.tagInitializedHost.collectAsState().value
         MonoValue(tagHost?.let { "last init ping: $it" } ?: "— (open the browser on a study page)")
+
+        HorizontalDivider(color = Brand.border)
+
+        BrandEyebrow("Parity capture (M5)")
+        LaunchedEffect(Unit) { EventSpy.loadCapturedPostCount() }
+        var spyEnabled by remember { mutableStateOf(EventSpy.enabled) }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text("Event spy", fontSize = 13.sp, color = Brand.text)
+            Spacer(Modifier.weight(1f))
+            Switch(
+                checked = spyEnabled,
+                onCheckedChange = {
+                    spyEnabled = it
+                    EventSpy.enabled = it
+                },
+            )
+        }
+        val postCount = EventSpy.capturedPostCount.collectAsState().value
+        MonoValue("captured POSTs: $postCount")
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            TextButton(onClick = { EventSpy.exportCapture(context) }, enabled = postCount > 0) {
+                Text("Export capture (JSONL)", fontSize = 13.sp, color = Brand.link)
+            }
+            TextButton(onClick = { EventSpy.clearCapture() }, enabled = postCount > 0) {
+                Text("Clear capture", fontSize = 13.sp, color = Brand.dangerSolid)
+            }
+        }
+        Text(
+            "Mirrors the tag's event POSTs to files/moveo-events.jsonl. Toggle applies the next time the browser is opened. Diff against a desktop capture with the iOS repo's Scripts/diff-events.mjs.",
+            fontSize = 12.sp,
+            color = Brand.textSecondary,
+        )
 
         HorizontalDivider(color = Brand.border)
 

@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Debug-only FileProvider paths: the parity-capture JSONL export (§a3.1).
+     files-path "." exposes only app-internal files/ through explicit
+     ACTION_SEND grants. -->
+<paths>
+    <files-path name="qa" path="." />
+</paths>

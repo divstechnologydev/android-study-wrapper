@@ -121,6 +121,12 @@ class StudyWebViewController(
         source?.let {
             scriptHandlers += WebViewCompat.addDocumentStartJavaScript(webView, it, rules)
         }
+        // M5 parity capture (§a3.1): the spy wraps fetch AFTER the tag so it
+        // sees the URL the tag asked for. Debug source set only — the
+        // release DebugHooks always returns null.
+        DebugHooks.eventSpyScript()?.let { spy ->
+            scriptHandlers += WebViewCompat.addDocumentStartJavaScript(webView, spy, rules)
+        }
     }
 
     /// `allowedOriginRules` derived in ONE place (Origins, §a0.3): each
@@ -149,6 +155,10 @@ class StudyWebViewController(
             val type = body["type"] ?: return@addWebMessageListener
             model.handleBridgeMessage(type = type, body = body)
         }
+        // M5 parity capture: separate "moveoDebug" listener, same origin
+        // rules. Bound at creation — the spy toggle applies the next time
+        // the browser is opened (as on iOS). No-op in release.
+        DebugHooks.installEventSpyBridge(webView, rules)
     }
 
     // MARK: - BrowserProxy

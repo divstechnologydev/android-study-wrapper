@@ -1,6 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Debug manifest overlay: cleartext-to-localhost config for the mock
-     backend (§a2.7). Merged only into debug builds. -->
+     backend (§a2.7) and the parity-capture export FileProvider (§a3.1).
+     Merged only into debug builds. -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-    <application android:networkSecurityConfig="@xml/network_security_config" />
+    <application android:networkSecurityConfig="@xml/network_security_config">
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.debugfiles"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/debug_file_paths" />
+        </provider>
+    </application>
 </manifest>
