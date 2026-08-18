@@ -55,6 +55,24 @@ class ScriptBuilderTests {
         )
     }
 
+    /// a3.2 matrix: config variants the mock backend can't serve — the
+    /// wrapper's whole job for these fields is verbatim pass-through into
+    /// the payload (behavior is the tag's, normative in the extension repo).
+    @Test
+    fun storageSourceAndExcludeVariantsPassThrough() {
+        val sessionText = Fixtures.text("valid-full.json")
+            .replace("\"storageSource\": \"local\"", "\"storageSource\": \"session\"")
+        val session = checkNotNull(ConfigValidator.validate(sessionText).configOrNull)
+        assertTrue(build(session).contains("\"storageSource\":\"session\""))
+
+        val excludeTrueText = Fixtures.text("valid-full.json")
+            .replace("\"excludeDetailedTracking\": false", "\"excludeDetailedTracking\": true")
+        val excludeTrue = checkNotNull(ConfigValidator.validate(excludeTrueText).configOrNull)
+        assertTrue(build(excludeTrue).contains("\"exclude_detailed_tracking\":true"))
+
+        // false pinned by payloadCarriesBridgeMapping; absent by the test above.
+    }
+
     @Test
     fun eventTargetIncludedOnlyWhileUnfired() {
         val eventConfig = config(name = "valid-event-match.json")

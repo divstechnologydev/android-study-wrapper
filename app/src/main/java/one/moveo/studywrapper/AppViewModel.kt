@@ -506,6 +506,10 @@ class AppViewModel(
     fun leadSheetLaunched(sheet: LeadSheet, success: Boolean) {
         _leadSheet.value = null
         if (!success) return
+        // QA oracle (§a3.2): the OS redacts intent URIs in logcat, so this is
+        // the only observable record of the launched lead URL (debug builds
+        // only; carries at most the pseudonymous participant id).
+        debugLog?.invoke("lead: ${sheet.kind} ${sheet.url}")
         val study = store.activeStudy ?: return
         val updated = when (sheet.kind) {
             LeadSheet.Kind.LEAD_IN -> study.copy(leadInShownAt = Instant.now())
