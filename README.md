@@ -81,3 +81,13 @@ build-verifiable (`unzip -l`/`aapt` audits) but not device-installable.
   backend, schema fixtures.
 - `../../ios-study-wrapper/ios-study-wrapper/` — the reference
   implementation this app mirrors screen-for-screen and rule-for-rule.
+
+## Tag update discipline ([plan §a4.4](docs/plan.md))
+
+Tag updates ship **deliberately**: re-run `scripts/vendor-tag.sh` against
+the updated extension repo, commit the new `VENDOR.json`
+(commit hash + sha256 is the provenance), re-run the fixture suite and the
+a3.1 parity diff, then release. Never edit `assets/moveo-one.js`.
+
+**Exit criteria (a4):** production release on Google Play; pilot study data
+verified comparable with desktop/iOS cohorts.
