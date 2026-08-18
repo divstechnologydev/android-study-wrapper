@@ -291,21 +291,44 @@ fun Modifier.brandCard(): Modifier = this
     .background(Brand.bgElevated)
     .border(1.dp, Color(0xFF141414).copy(alpha = 0.08f), RoundedCornerShape(Brand.radiusCard))
 
+/// The iOS `accessibilityReduceMotion` analogue: the system animator scale.
+/// 0 (animations off in accessibility/developer settings) disables the
+/// repeat-forever brand animations — same rule as iOS. Also keeps the app
+/// fully render-idle for QA tooling (uiautomator waits for idle).
+@Composable
+private fun animationsEnabled(): Boolean {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    return remember {
+        android.provider.Settings.Global.getFloat(
+            context.contentResolver,
+            android.provider.Settings.Global.ANIMATOR_DURATION_SCALE,
+            1f,
+        ) > 0f
+    }
+}
+
 /// Brand kit v3 auth background — the platform's AuthBackground: faint
 /// constellation, an orange spark and a muted indigo wash for depth.
 @Composable
 fun AuthBackground(modifier: Modifier = Modifier) {
-    val drift = rememberInfiniteTransition(label = "authDrift")
-    val dx by drift.animateFloat(
-        initialValue = 0f, targetValue = -12f,
-        animationSpec = infiniteRepeatable(tween(30_000), RepeatMode.Reverse),
-        label = "dx",
-    )
-    val dy by drift.animateFloat(
-        initialValue = 0f, targetValue = 8f,
-        animationSpec = infiniteRepeatable(tween(30_000), RepeatMode.Reverse),
-        label = "dy",
-    )
+    var dx = 0f
+    var dy = 0f
+    if (animationsEnabled()) {
+        // Same rule as StatusDot: repeat-forever only when motion is allowed.
+        val drift = rememberInfiniteTransition(label = "authDrift")
+        val dxAnim by drift.animateFloat(
+            initialValue = 0f, targetValue = -12f,
+            animationSpec = infiniteRepeatable(tween(30_000), RepeatMode.Reverse),
+            label = "dx",
+        )
+        val dyAnim by drift.animateFloat(
+            initialValue = 0f, targetValue = 8f,
+            animationSpec = infiniteRepeatable(tween(30_000), RepeatMode.Reverse),
+            label = "dy",
+        )
+        dx = dxAnim
+        dy = dyAnim
+    }
     Box(modifier = modifier.fillMaxSize().background(Brand.bg)) {
         Image(
             painter = painterResource(R.drawable.auth_constellation),
@@ -348,7 +371,7 @@ fun StatusDot(mode: StatusDotMode) {
         StatusDotMode.PAUSED -> Brand.warningSolid
         StatusDotMode.NEUTRAL -> Brand.borderStrong
     }
-    val alpha: Float = if (mode == StatusDotMode.ACTIVE) {
+    val alpha: Float = if (mode == StatusDotMode.ACTIVE && animationsEnabled()) {
         val blink = rememberInfiniteTransition(label = "dotBlink")
         val value by blink.animateFloat(
             initialValue = 1f, targetValue = 0.4f,

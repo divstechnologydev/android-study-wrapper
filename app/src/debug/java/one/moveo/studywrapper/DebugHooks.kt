@@ -42,15 +42,16 @@ object DebugHooks {
         }
     }
 
-    /// Gear icon in the top-right (the iOS nav-bar toolbar item) opening the
-    /// debug settings screen.
+    /// Gear icon in the bottom-left (kept clear of the home header's study
+    /// menu AND the consent screen's Accept button) opening the debug
+    /// settings screen — the iOS nav-bar toolbar item's analogue.
     @Composable
     fun DebugGearOverlay(model: AppViewModel) {
         var showSettings by remember { mutableStateOf(false) }
         Box(modifier = Modifier.fillMaxSize()) {
             IconButton(
                 onClick = { showSettings = true },
-                modifier = Modifier.align(Alignment.TopEnd).padding(top = 4.dp, end = 4.dp),
+                modifier = Modifier.align(Alignment.BottomStart).padding(bottom = 8.dp, start = 8.dp),
             ) {
                 Text("⚙", fontSize = 20.sp, color = Brand.textMuted)
             }

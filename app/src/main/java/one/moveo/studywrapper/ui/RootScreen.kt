@@ -28,11 +28,16 @@ fun RootScreen(model: AppViewModel) {
     val pending by model.pendingConfirmation.collectAsState()
     val activeStudy by model.activeStudy.collectAsState()
     val endedStudy by model.endedStudy.collectAsState()
+    val browserPresented by model.browserPresented.collectAsState()
 
     Box(modifier = Modifier.fillMaxSize()) {
         val study = activeStudy
         val ended = endedStudy
         when {
+            // Full-screen browser cover (the iOS fullScreenCover) — the real
+            // StudyBrowserScreen lands in M4.
+            browserPresented && study != null ->
+                BrowserPlaceholder(model)
             study != null && phase is AppViewModel.Phase.Idle && pending == null ->
                 StudyHomeScreen(model, study)
             study == null && ended != null && phase is AppViewModel.Phase.Idle && pending == null ->
@@ -43,36 +48,30 @@ fun RootScreen(model: AppViewModel) {
         // Debug builds overlay a gear (the iOS nav-bar toolbar item); the
         // release source set makes this a no-op — the QA surface does not
         // exist in the release binary (§a2.7).
-        DebugHooks.DebugGearOverlay(model)
+        if (!browserPresented) {
+            DebugHooks.DebugGearOverlay(model)
+        }
     }
 }
 
-/// Interim home surface — the full StudyHomeScreen (live-tracking status,
-/// open-browser, leave-study) lands in M3. Reaching it requires a completed
-/// enroll, which the M3 consent screen gates.
+/// Interim browser surface — the WebView shell (injection, bridge,
+/// navigation policy) is phase a2.3–a2.5 / M4.
 @Composable
-private fun StudyHomeScreen(model: AppViewModel, study: one.moveo.studycore.ActiveStudy) {
+private fun BrowserPlaceholder(model: AppViewModel) {
     AuthPage {
         Column(
             modifier = Modifier.fillMaxWidth().brandCard().padding(24.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
-            BrandEyebrow("Active study")
-            Text(
-                study.config.study.name,
-                fontSize = 20.sp,
-                fontWeight = FontWeight.SemiBold,
-                color = Brand.text,
-            )
+            BrandEyebrow("Study browser")
             BrandNotice(
-                text = "The study home screen arrives in the next milestone (M3).",
+                text = "The in-app study browser (WebView + tag injection) arrives in the next milestone (M4).",
                 background = Brand.infoBg,
                 foreground = Brand.infoText,
             )
-            BrandGhostButton(
-                text = "Leave study",
-                role = GhostRole.DANGER,
-                onClick = { model.leaveStudy() },
+            BrandPrimaryButton(
+                text = "Done",
+                onClick = { model.closeBrowser() },
                 modifier = Modifier.fillMaxWidth(),
             )
         }

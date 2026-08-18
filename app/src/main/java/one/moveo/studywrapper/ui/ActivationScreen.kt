@@ -294,33 +294,3 @@ fun StudySummarySheet(model: AppViewModel, pending: AppViewModel.PendingActivati
     }
 }
 
-/// Interim consent surface — the full ConsentScreen (a0.5 wording, ported
-/// from iOS ConsentView) lands in M3. Decline already honors the invariant:
-/// nothing stored, nothing tracked, no backend call.
-@Composable
-private fun ConsentScreen(model: AppViewModel, pending: AppViewModel.PendingActivation) {
-    AuthPage {
-        Column(
-            modifier = Modifier.fillMaxWidth().brandCard().padding(24.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp),
-        ) {
-            BrandEyebrow("Consent")
-            Text(
-                pending.config.study.name,
-                fontSize = 20.sp,
-                fontWeight = FontWeight.SemiBold,
-                color = Brand.text,
-            )
-            BrandNotice(
-                text = "The consent screen arrives in the next milestone (M3). Nothing has been stored or sent.",
-                background = Brand.infoBg,
-                foreground = Brand.infoText,
-            )
-            BrandGhostButton(
-                text = "Decline",
-                onClick = { model.declineConsent() },
-                modifier = Modifier.fillMaxWidth(),
-            )
-        }
-    }
-}

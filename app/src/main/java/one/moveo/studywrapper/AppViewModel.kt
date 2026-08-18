@@ -328,6 +328,10 @@ class AppViewModel(
         _browserPresented.value = true
     }
 
+    fun closeBrowser() {
+        _browserPresented.value = false
+    }
+
     private fun presentDueLeadOut() {
         // a2.6: recover a persisted leadOutDueAt after an app kill.
     }
