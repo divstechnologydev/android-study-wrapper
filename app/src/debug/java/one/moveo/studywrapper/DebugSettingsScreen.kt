@@ -47,6 +47,7 @@ fun DebugSettingsScreen(model: AppViewModel, onDone: () -> Unit) {
     val context = LocalContext.current
     var overrideText by remember { mutableStateOf(model.store.apiBaseOverride ?: "") }
     val mockBase = "http://10.0.2.2:8787/api/v1/extension-config"
+    val devBase = "https://dev-pigeon.moveo.one/api/v1/extension-config"
 
     fun apply() {
         val trimmed = overrideText.trim()
@@ -82,6 +83,9 @@ fun DebugSettingsScreen(model: AppViewModel, onDone: () -> Unit) {
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             TextButton(onClick = { overrideText = mockBase }) {
                 Text("Use local mock", fontSize = 13.sp, color = Brand.link)
+            }
+            TextButton(onClick = { overrideText = devBase }) {
+                Text("Use dev", fontSize = 13.sp, color = Brand.link)
             }
             TextButton(onClick = { overrideText = "" }) {
                 Text("Use production", fontSize = 13.sp, color = Brand.dangerSolid)
