@@ -243,17 +243,15 @@ fun StudySummarySheet(model: AppViewModel, pending: AppViewModel.PendingActivati
                 .padding(bottom = 24.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
-            // Header row: Cancel / title / Continue (the iOS nav bar).
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                BrandGhostButton(text = "Cancel", onClick = { model.cancelActivation() })
-                Spacer(Modifier.weight(1f))
-                Text("Join study", fontSize = 16.sp, fontWeight = FontWeight.SemiBold, color = Brand.text)
-                Spacer(Modifier.weight(1f))
-                BrandGhostButton(text = "Continue", onClick = { model.confirmActivation() })
-            }
+            // Centered title; the actions live in the button row at the
+            // bottom of the sheet where they read as real buttons.
+            Text(
+                "Join study",
+                fontSize = 16.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = Brand.text,
+                modifier = Modifier.align(Alignment.CenterHorizontally),
+            )
 
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 BrandEyebrow("Study")
@@ -288,6 +286,22 @@ fun StudySummarySheet(model: AppViewModel, pending: AppViewModel.PendingActivati
                     fontSize = 13.sp,
                     lineHeight = 19.sp,
                     color = Brand.textSecondary,
+                )
+            }
+
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                BrandSecondaryButton(
+                    text = "Cancel",
+                    onClick = { model.cancelActivation() },
+                    modifier = Modifier.weight(1f),
+                )
+                BrandPrimaryButton(
+                    text = "Continue",
+                    onClick = { model.confirmActivation() },
+                    modifier = Modifier.weight(1f),
                 )
             }
         }

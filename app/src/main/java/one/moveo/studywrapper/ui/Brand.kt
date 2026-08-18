@@ -160,6 +160,44 @@ fun BrandPrimaryButton(
     }
 }
 
+/// Secondary — same geometry as primary but with the muted border and
+/// secondary ink, so it reads as a real button without competing with the
+/// primary action next to it (Cancel/Continue pairs).
+@Composable
+fun BrandSecondaryButton(
+    text: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+) {
+    val interaction = remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    Surface(
+        onClick = onClick,
+        modifier = modifier
+            .defaultMinSize(minHeight = 44.dp)
+            .alpha(if (enabled) 1f else 0.5f),
+        enabled = enabled,
+        shape = RoundedCornerShape(Brand.radiusSM),
+        color = if (pressed) Brand.bgHover else Brand.bgElevated,
+        contentColor = if (pressed) Brand.text else Brand.textSecondary,
+        border = androidx.compose.foundation.BorderStroke(1.dp, Brand.border),
+        interactionSource = interaction,
+    ) {
+        Box(
+            modifier = Modifier.defaultMinSize(minHeight = 44.dp).padding(horizontal = 16.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                text,
+                fontSize = 15.sp,
+                fontWeight = FontWeight.Medium,
+                color = if (pressed) Brand.text else Brand.textSecondary,
+            )
+        }
+    }
+}
+
 enum class GhostRole { NEUTRAL, DANGER }
 
 @Composable

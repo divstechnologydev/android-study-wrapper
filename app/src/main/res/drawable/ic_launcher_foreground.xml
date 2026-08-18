@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Launcher foreground: the "|M>" mark from the iOS app icon (paths from
+     the brand logo-mark.svg; the chevron is translated left to sit tight
+     after the M, matching AppIcon1024.png's composition). Composed mark is
+     472x270.6 units, scaled to ~54dp wide inside the 66dp adaptive safe
+     zone, centered in the 108dp viewport. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <group
+        android:translateX="27"
+        android:translateY="38.52"
+        android:scaleX="0.11441"
+        android:scaleY="0.11441">
+        <path
+            android:fillColor="#FAFAFA"
+            android:pathData="M-0.000133147 268.61L20.6211 0L46.6445 1.99782L26.0233 270.607L-0.000133147 268.61Z" />
+        <path
+            android:fillColor="#FAFAFA"
+            android:pathData="M124.173 236H86.373L102.573 33.7998H145.773L173.373 107.3C178.173 119.7 182.673 132.1 186.873 144.5C191.073 156.7 194.073 165.8 195.873 171.8L198.573 181.1C204.773 160.3 213.373 135.7 224.373 107.3L252.573 33.7998H295.773L315.573 236H277.773L270.573 157.1L265.173 86.2998C257.973 106.9 249.373 130.5 239.373 157.1L211.173 233H185.373L157.773 157.1L134.073 87.1998C134.073 96.9998 132.773 120.3 130.173 157.1L124.173 236Z" />
+        <group android:translateX="-233">
+            <path
+                android:fillColor="#FAFAFA"
+                android:pathData="M705 145.6V170.8L594 246.1V213.1L674.4 160V156.4L594 103V70L705 145.6Z" />
+        </group>
+    </group>
+</vector>
