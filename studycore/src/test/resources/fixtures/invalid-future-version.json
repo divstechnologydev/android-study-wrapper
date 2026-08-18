@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 99,
+  "study": {
+    "id": "st_bad002",
+    "name": "Future schema version study",
+    "status": "active"
+  },
+  "tracking": {
+    "token": "MOVEO_PROJECT_TOKEN_EXAMPLE",
+    "apiUrl": "https://api.moveo.one/api/analytic/event/tag",
+    "origins": ["shop.example.com"]
+  }
+}

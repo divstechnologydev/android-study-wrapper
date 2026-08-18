@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Light-only theme, pinned (brand kit v3 — docs/plan.md §a2.2).
+         Compose draws everything; this only styles the window.
+         forceDarkAllowed=false is layered in values-v29/. -->
+    <style name="Theme.StudyWrapper" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@android:color/white</item>
+    </style>
+</resources>

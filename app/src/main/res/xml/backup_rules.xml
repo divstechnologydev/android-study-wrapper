@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- API ≤ 30 Auto Backup rules (§a0.4): the participant id must survive
+     reinstall best-effort; the study state rides along like iOS defaults do. -->
+<full-backup-content>
+    <include domain="sharedpref" path="participant.xml" />
+    <include domain="sharedpref" path="studywrapper.xml" />
+</full-backup-content>

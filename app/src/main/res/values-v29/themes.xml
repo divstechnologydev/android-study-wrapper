@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- API 29+: opt out of system force-dark — the light theme is pinned
+         (docs/plan.md §a2.2). -->
+    <style name="Theme.StudyWrapper" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@android:color/white</item>
+        <item name="android:forceDarkAllowed">false</item>
+    </style>
+</resources>

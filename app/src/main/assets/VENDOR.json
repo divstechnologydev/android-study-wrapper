@@ -1,0 +1,10 @@
+{
+  "source": "chrome-extension/moveo_one_chrome_extension",
+  "sourceCommit": "0f26cfcbc1f29d5492fe5609aac066b470b94c2f",
+  "sourceDirty": false,
+  "vendoredAt": "2026-08-18T07:47:31Z",
+  "files": {
+    "moveo-one.js": { "sha256": "7c484abae54ea9fb21f8aad18f13b4f45c7ff47d0b9f64c1d3d00fe82658ae0a" },
+    "fixtures": { "count": 20 }
+  }
+}

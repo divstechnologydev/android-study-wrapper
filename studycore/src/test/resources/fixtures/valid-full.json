@@ -1,0 +1,41 @@
+{
+  "schemaVersion": 1,
+  "study": {
+    "id": "st_8f3k2m",
+    "name": "Sainsbury's meat purchase study",
+    "status": "active"
+
+  },
+  "tracking": {
+    "token": "MOVEO_PROJECT_TOKEN_EXAMPLE",
+    "apiUrl": "https://api.moveo.one/api/analytic/event/tag",
+    "origins": ["sainsburys.co.uk"],
+    "deploymentType": "STATIC_WEBSITE",
+    "appVersion": "1.0.0",
+    "storageSource": "local",
+    "userDataKeys": [],
+    "excludeDetailedTracking": false,
+    "semanticGroupRules": [
+      {
+        "container": "article[data-testid^='product-tile']",
+        "name": [
+          { "source": "h2[data-testid='product-tile-description'] a", "attribute": "title" },
+          { "source": "self", "attribute": "data-testid" }
+        ],
+        "mode": "first"
+      }
+    ],
+    "additionalTrackedElements": [
+      { "selector": "span[data-testid='contextual-price-text']", "type": "price_nectar" },
+      { "selector": "span[data-testid='pt-retail-price']", "type": "price_retail" }
+    ]
+  },
+  "flow": {
+    "leadInUrl": "https://forms.example.com/intro",
+    "leadOutUrl": "https://forms.example.com/exit",
+    "targetAction": {
+      "type": "url_match",
+      "pattern": "/checkout/success"
+    }
+  }
+}

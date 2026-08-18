@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "study": {
+    "id": "st_min001",
+    "name": "Minimal study",
+    "status": "active"
+  },
+  "tracking": {
+    "token": "MOVEO_PROJECT_TOKEN_EXAMPLE",
+    "apiUrl": "https://api.moveo.one/api/analytic/event/tag",
+    "origins": ["shop.example.com"]
+  }
+}

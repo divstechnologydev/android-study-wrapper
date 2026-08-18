@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "study": {
+    "id": "st_tracked1",
+    "name": "Force-tracked elements study",
+    "status": "active"
+  },
+  "tracking": {
+    "token": "MOVEO_PROJECT_TOKEN_EXAMPLE",
+    "apiUrl": "https://api.moveo.one/api/analytic/event/tag",
+    "origins": ["shop.example.com"],
+    "additionalTrackedElements": [
+      { "selector": "span[data-testid='contextual-price-text']", "type": "price_nectar" },
+      { "selector": "li.swiper-slide span.pricing__price" }
+    ]
+  }
+}

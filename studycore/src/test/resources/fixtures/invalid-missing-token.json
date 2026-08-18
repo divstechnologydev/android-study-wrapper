@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "study": {
+    "id": "st_bad001",
+    "name": "Missing token study",
+    "status": "active"
+  },
+  "tracking": {
+    "apiUrl": "https://api.moveo.one/api/analytic/event/tag",
+    "origins": ["shop.example.com"]
+  }
+}

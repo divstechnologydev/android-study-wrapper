@@ -1,0 +1,49 @@
+{
+  "$comment": "Sainsbury's (sainsburys.co.uk) tracking config fragments — reference copy only, loaded by nothing. To use, paste the arrays into a study config under tracking.* (contract: docs/config-schema.md §3.1/§3.2; guides: docs/README.md → 'Semantic-group (sg) rules' and 'Force-tracked elements'). semanticGroupRules groups every event inside a product tile under the product name — one rule per markup variant: article[data-testid^='product-tile'] is the older listing tile (name from the description link's title attr, falling back to the tile's data-testid, product-tile-<id>); [data-testid='gw-product-card'] is the newer Fable design-system card (name from the gw-product-name link's title attr, falling back to its text, then the product image alt). The variants' selectors are disjoint, so whichever isn't present on a page is inert. Anchor only on data-testid hooks — the Fable markup's fable:* utility classes, *-module__* CSS-module hashes, React-generated ids (_R_...), and data-pkgid (embeds the design-system version) all change across builds/renders. additionalTrackedElements force-tracks the price spans (heuristics roll them up into the tile text) so prices emit their own appear/click/hover events — with the sg rule active, each price event carries its product's name as sg, and each entry's type becomes the event's eT (price_nectar / price_retail / price_unit) so the three price kinds are distinguishable in the data. Verify selectors against the live DOM before shipping (they are the site's markup, not ours).",
+  "tracking": {
+    "semanticGroupRules": [
+      {
+        "container": "article[data-testid^='product-tile']",
+        "name": [
+          {
+            "source": "h2[data-testid='product-tile-description'] a",
+            "attribute": "title"
+          },
+          { "source": "self", "attribute": "data-testid" }
+        ],
+        "mode": "first"
+      },
+      {
+        "container": "[data-testid='gw-product-card']",
+        "name": [
+          { "source": "[data-testid='gw-product-name']", "attribute": "title" },
+          { "source": "[data-testid='gw-product-name']" },
+          {
+            "source": "[data-testid='gw-product-image'] img",
+            "attribute": "alt"
+          }
+        ],
+        "mode": "first"
+      }
+    ],
+    "additionalTrackedElements": [
+      {
+        "selector": "span[data-testid='contextual-price-text']",
+        "type": "price_nectar"
+      },
+      {
+        "selector": "span[data-testid='pt-retail-price']",
+        "type": "price_retail"
+      },
+      { "selector": "span[data-testid='pt-unit-price']", "type": "price_unit" },
+      {
+        "selector": "[data-testid='gw-product-retail-price'] .ds-c-price__price",
+        "type": "price_retail"
+      },
+      {
+        "selector": "[data-testid='gw-product-retail-price'] .ds-c-price__price-per-unit",
+        "type": "price_unit"
+      }
+    ]
+  }
+}

@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "study": {
+    "id": "st_sgrules1",
+    "name": "Sg rules study",
+    "status": "active"
+  },
+  "tracking": {
+    "token": "MOVEO_PROJECT_TOKEN_EXAMPLE",
+    "apiUrl": "https://api.moveo.one/api/analytic/event/tag",
+    "origins": ["shop.example.com"],
+    "semanticGroupRules": [
+      {
+        "container": "article[data-testid^='product-tile']",
+        "name": [
+          { "source": "h2[data-testid='product-tile-description'] a", "attribute": "title" },
+          { "source": "self", "attribute": "data-testid" },
+          { "source": ".pt__link" }
+        ],
+        "mode": "first"
+      },
+      {
+        "container": ".product-item[data-productid]",
+        "name": [
+          { "source": "self", "attribute": "data-productid" },
+          { "source": ".title a", "attribute": "title" }
+        ],
+        "mode": "join"
+      }
+    ]
+  }
+}

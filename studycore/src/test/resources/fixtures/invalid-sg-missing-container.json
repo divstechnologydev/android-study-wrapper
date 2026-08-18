@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "study": {
+    "id": "st_sgbad01",
+    "name": "Sg rules study",
+    "status": "active"
+  },
+  "tracking": {
+    "token": "MOVEO_PROJECT_TOKEN_EXAMPLE",
+    "apiUrl": "https://api.moveo.one/api/analytic/event/tag",
+    "origins": ["shop.example.com"],
+    "semanticGroupRules": [
+      {
+        "name": [{ "source": ".title a", "attribute": "title" }]
+      }
+    ]
+  }
+}

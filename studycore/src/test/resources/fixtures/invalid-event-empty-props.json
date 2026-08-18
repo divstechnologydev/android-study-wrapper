@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "study": {
+    "id": "st_8f3k2m",
+    "name": "Sainsbury's meat purchase study",
+    "status": "active"
+
+  },
+  "tracking": {
+    "token": "MOVEO_PROJECT_TOKEN_EXAMPLE",
+    "apiUrl": "https://api.moveo.one/api/analytic/event/tag",
+    "origins": [
+      "sainsburys.co.uk"
+    ],
+    "deploymentType": "STATIC_WEBSITE",
+    "appVersion": "1.0.0",
+    "storageSource": "local",
+    "userDataKeys": [],
+    "excludeDetailedTracking": false
+  },
+  "flow": {
+    "leadInUrl": "https://forms.example.com/intro",
+    "leadOutUrl": "https://forms.example.com/exit",
+    "targetAction": {
+      "type": "event_match",
+      "props": {}
+    }
+  }
+}
