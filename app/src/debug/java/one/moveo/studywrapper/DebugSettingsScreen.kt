@@ -16,6 +16,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -96,6 +97,12 @@ fun DebugSettingsScreen(model: AppViewModel, onDone: () -> Unit) {
 
         BrandEyebrow("Participant ID (backed-up prefs)")
         MonoValue(model.store.participantId())
+
+        HorizontalDivider(color = Brand.border)
+
+        BrandEyebrow("Tag health")
+        val tagHost = model.tagInitializedHost.collectAsState().value
+        MonoValue(tagHost?.let { "last init ping: $it" } ?: "— (open the browser on a study page)")
 
         HorizontalDivider(color = Brand.border)
 

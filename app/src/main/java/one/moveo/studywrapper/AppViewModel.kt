@@ -20,9 +20,15 @@ import one.moveo.studycore.ConsentConstants
 import one.moveo.studycore.ConsentRecord
 import one.moveo.studycore.EndedStudy
 import one.moveo.studycore.EnrollError
+import one.moveo.studycore.FlowConstants
+import one.moveo.studycore.Origins
+import one.moveo.studycore.ScriptBuilder
 import one.moveo.studycore.SetupLink
 import one.moveo.studycore.StudyConfig
 import one.moveo.studycore.StudyStore
+import one.moveo.studycore.TargetAction
+import one.moveo.studycore.TargetMatch
+import one.moveo.studywrapper.browser.BrowserProxy
 
 /// App-level state machine (← iOS AppModel.swift). Owns the store and drives
 /// which screen shows; all contract logic (validation, error mapping,
@@ -37,6 +43,9 @@ class AppViewModel(
     /// the debug branches.
     private val isDebugBuild: Boolean,
     private val debugLog: ((String) -> Unit)? = null,
+    /// Reads a bundled asset (the vendored tag + bootstrap); injected so this
+    /// class stays constructor-testable. Returns null when missing.
+    private val assetLoader: (String) -> String? = { null },
     private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate),
 ) {
     data class PendingActivation(
@@ -83,9 +92,34 @@ class AppViewModel(
     private val _browserPresented = MutableStateFlow(false)
     val browserPresented: StateFlow<Boolean> = _browserPresented
 
+    /// Non-null asks the UI layer to launch a lead survey (Custom Tab). The
+    /// UI consumes it via `leadSheetLaunched` — "presented" = successful
+    /// launch (Android has no render callback; recorded in plan §6).
+    data class LeadSheet(val url: String, val kind: Kind) {
+        enum class Kind { LEAD_IN, LEAD_OUT }
+    }
+
+    private val _leadSheet = MutableStateFlow<LeadSheet?>(null)
+    val leadSheet: StateFlow<LeadSheet?> = _leadSheet
+
+    /// Live WebView handle while the browser is on screen (← iOS `weak var
+    /// browser`); set by the controller on attach, cleared on detach.
+    var browser: BrowserProxy? = null
+
+    /// Last hostname the injected tag reported "initialized" from (bridge
+    /// health ping) — debug-build surface only (release never renders it).
+    private val _tagInitializedHost = MutableStateFlow<String?>(null)
+    val tagInitializedHost: StateFlow<String?> = _tagInitializedHost
+
     /// Scripted-QA auto flow (debug builds only — release never sets this;
     /// the Android analogue of the iOS MOVEO_AUTO_FLOW env var, §a2.7).
     var qaAutoFlow: String? = null
+
+    /// Scripted-QA: URL to navigate the browser to after launch (debug only).
+    var qaAutoNav: String? = null
+
+    /// DEBUG explicit ingest-redirect override (the iOS `ingestOverride`).
+    var ingestOverride: String? = null
 
     val apiBase: HttpUrl
         get() {
@@ -315,6 +349,7 @@ class AppViewModel(
         _activeStudy.value = null
         _endedStudy.value = ended
         _browserPresented.value = false
+        _leadSheet.value = null
     }
 
     fun dismissEndedStudy() {
@@ -322,7 +357,14 @@ class AppViewModel(
         _endedStudy.value = null
     }
 
-    // MARK: - M4 stubs (browser + injection + lead flow, phase a2.3–a2.6)
+    // MARK: - Browser session (← iOS AppModel+Browser)
+
+    /// First origin at `flow.prepositionPath` when configured, else its root.
+    val browserStartUrl: String?
+        get() = store.activeStudy?.config?.startUrl
+
+    val studyOrigins: List<String>?
+        get() = store.activeStudy?.config?.tracking?.origins
 
     fun openBrowser() {
         _browserPresented.value = true
@@ -332,12 +374,180 @@ class AppViewModel(
         _browserPresented.value = false
     }
 
-    private fun presentDueLeadOut() {
-        // a2.6: recover a persisted leadOutDueAt after an app kill.
+    /// The combined user script for the CURRENT state — null when there is no
+    /// study (no injection at all).
+    fun currentUserScriptSource(): String? {
+        val study = store.activeStudy ?: return null
+        val tag = assetLoader("moveo-one.js") ?: return null
+        val bootstrap = assetLoader("moveo-bootstrap.android.js") ?: return null
+        val includeEventTarget =
+            study.config.flow.targetAction is TargetAction.EventMatch && !study.targetFired
+        return ScriptBuilder.userScriptSource(
+            config = study.config,
+            tagSource = tag,
+            bootstrapSource = bootstrap,
+            yieldHosts = store.ownTagHosts.keys.toList(),
+            includeEventTarget = includeEventTarget,
+        )
     }
 
+    /// Rebuild + reapply the injected script (config refresh, own-tag yield,
+    /// target fired). Takes effect on the next page load.
     private fun refreshUserScript() {
-        // a2.3: re-apply the document-start script after a config change.
+        browser?.applyUserScript(currentUserScriptSource())
+    }
+
+    // MARK: - URL-driven flow (extension: target-service.handleUrlChange)
+
+    fun handleBrowserUrlChange(url: String) {
+        val study = store.activeStudy ?: return
+        val parsed = try {
+            java.net.URI(url)
+        } catch (_: Exception) {
+            return
+        }
+        val scheme = parsed.scheme?.lowercase() ?: return
+        if (scheme != "http" && scheme != "https") return
+        val host = parsed.host ?: return
+        if (!Origins.hostnameMatches(host, study.config.tracking.origins)) return
+
+        // Lead-in (§4.1): on the participant's FIRST visit to a tracked
+        // origin — not at enrollment. Once per enrollment; pointless after
+        // completion.
+        val leadIn = study.config.flow.leadInUrl
+        if (study.leadInShownAt == null && !study.targetFired &&
+            leadIn != null && _leadSheet.value == null
+        ) {
+            leadUrl(leadIn, study.config.flow)?.let { url ->
+                _leadSheet.value = LeadSheet(url = url, kind = LeadSheet.Kind.LEAD_IN)
+            }
+        }
+
+        // url_match target (§4.2.2) — evaluated natively on every URL change
+        // (doUpdateVisitedHistory catches pushState too). event_match arrives
+        // via the bridge.
+        val target = study.config.flow.targetAction
+        if (!study.targetFired && target is TargetAction.UrlMatch &&
+            TargetMatch.matchesUrl(url, target.pattern)
+        ) {
+            targetReached(study)
+        }
+    }
+
+    // MARK: - Bridge (a2.4)
+
+    fun handleBridgeMessage(type: String, body: Map<String, String?>) {
+        // Debug-only observability (null sink in release): type + hostname,
+        // never event payloads.
+        debugLog?.invoke("bridge: $type ${body["hostname"] ?: ""}")
+        when (type) {
+            "target" -> {
+                val study = store.activeStudy ?: return
+                if (!study.targetFired) targetReached(study)
+            }
+            "ownTag" -> {
+                val hostname = body["hostname"]?.lowercase()?.takeIf { it.isNotEmpty() } ?: return
+                if (store.ownTagHosts[hostname] == null) {
+                    store.ownTagHosts = store.ownTagHosts + (hostname to Instant.now())
+                    // Yield takes effect from the next page load on this host.
+                    refreshUserScript()
+                }
+            }
+            "initialized" -> {
+                if (isDebugBuild) _tagInitializedHost.value = body["hostname"]
+            }
+        }
+    }
+
+    // MARK: - Target & lead-out (extension: target-service)
+
+    /// Marks the target once per participant per study, schedules the
+    /// lead-out. `leadOutDueAt` is persisted BEFORE the timer so an app kill
+    /// inside the delay self-heals on next launch; `leadOutShownAt` is only
+    /// written after the Custom Tab actually launches — lost lead-outs
+    /// self-heal, shown ones never repeat.
+    private fun targetReached(study: ActiveStudy) {
+        val now = Instant.now()
+        var updated = study.copy(targetFired = true, targetFiredAt = now)
+        if (updated.config.flow.leadOutUrl != null && updated.leadOutShownAt == null) {
+            updated = updated.copy(
+                leadOutDueAt = now.plusMillis((FlowConstants.LEAD_OUT_DELAY_SECONDS * 1000).toLong()),
+            )
+        }
+        store.activeStudy = updated
+        _activeStudy.value = updated
+        refreshUserScript() // drops the event_match spec from future loads
+        if (updated.leadOutDueAt != null) {
+            scope.launch {
+                kotlinx.coroutines.delay((FlowConstants.LEAD_OUT_DELAY_SECONDS * 1000).toLong())
+                presentDueLeadOut()
+            }
+        }
+    }
+
+    /// Opens a due lead-out (fast path: the timer above; recovery path:
+    /// app-foreground re-validation / activity resume after a Custom Tab
+    /// closes). No-ops while another sheet is pending.
+    fun presentDueLeadOut() {
+        val study = store.activeStudy ?: return
+        val dueAt = study.leadOutDueAt ?: return
+        if (dueAt.isAfter(Instant.now())) return
+        if (study.leadOutShownAt != null) return
+        if (_leadSheet.value != null) return
+        val raw = study.config.flow.leadOutUrl ?: return
+        val url = leadUrl(raw, study.config.flow) ?: return
+        _leadSheet.value = LeadSheet(url = url, kind = LeadSheet.Kind.LEAD_OUT)
+    }
+
+    /// The UI layer attempted the Custom Tab launch. On success write the
+    /// shown-at flags (the "after presentation" rule — launch is the closest
+    /// Android signal to "rendered", plan §6); on failure keep the due state
+    /// so the lead-out self-heals on a later foreground.
+    fun leadSheetLaunched(sheet: LeadSheet, success: Boolean) {
+        _leadSheet.value = null
+        if (!success) return
+        val study = store.activeStudy ?: return
+        val updated = when (sheet.kind) {
+            LeadSheet.Kind.LEAD_IN -> study.copy(leadInShownAt = Instant.now())
+            LeadSheet.Kind.LEAD_OUT -> study.copy(leadOutShownAt = Instant.now(), leadOutDueAt = null)
+        }
+        store.activeStudy = updated
+        _activeStudy.value = updated
+    }
+
+    /// Lead URL with the participant id appended — only when the study
+    /// author opted in (it hands the id to a third-party form tool).
+    private fun leadUrl(raw: String, flow: StudyConfig.Flow): String? {
+        val parsed = raw.toHttpUrlOrNull() ?: return null
+        if (!flow.appendParticipantId) return parsed.toString()
+        return parsed.newBuilder()
+            .removeAllQueryParameters("participantId")
+            .addQueryParameter("participantId", store.participantId())
+            .build()
+            .toString()
+    }
+
+    // MARK: - Leave with data clearing (a2.6)
+
+    /// Leave clears study state AND the WebView environment wholesale
+    /// (cookies, storage, cache) — the participant's login on the study site
+    /// does not outlive the study. Android has no per-origin records API like
+    /// WKWebsiteDataStore, and the WebView only ever held study browsing, so
+    /// wholesale ⊇ per-origin (plan §6).
+    fun leaveStudyAndClearData() {
+        _browserPresented.value = false
+        _leadSheet.value = null
+        browser?.applyUserScript(null)
+        browser?.clearBrowsingData()
+        leaveStudy()
+        try {
+            android.webkit.CookieManager.getInstance().removeAllCookies(null)
+            android.webkit.CookieManager.getInstance().flush()
+            android.webkit.WebStorage.getInstance().deleteAllData()
+        } catch (_: Exception) {
+            // WebView provider unavailable (browser never opened) — nothing
+            // to clear.
+        }
     }
 
     private fun parseIsoDate(raw: String?): Instant? {

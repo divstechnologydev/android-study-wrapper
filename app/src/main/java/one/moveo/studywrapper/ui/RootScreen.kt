@@ -1,21 +1,16 @@
 package one.moveo.studywrapper.ui
 
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
+import androidx.compose.ui.platform.LocalContext
 import one.moveo.studywrapper.AppViewModel
 import one.moveo.studywrapper.DebugHooks
+import one.moveo.studywrapper.browser.LeadSurveyLauncher
 
 /// Root routing (← iOS RootView.swift): activeStudy+idle → StudyHome;
 /// endedStudy → EndedStudy (revoked vs ended wording); else Activation.
@@ -29,15 +24,16 @@ fun RootScreen(model: AppViewModel) {
     val activeStudy by model.activeStudy.collectAsState()
     val endedStudy by model.endedStudy.collectAsState()
     val browserPresented by model.browserPresented.collectAsState()
+    val leadSheet by model.leadSheet.collectAsState()
+    val context = LocalContext.current
 
     Box(modifier = Modifier.fillMaxSize()) {
         val study = activeStudy
         val ended = endedStudy
         when {
-            // Full-screen browser cover (the iOS fullScreenCover) — the real
-            // StudyBrowserScreen lands in M4.
+            // Full-screen browser cover (the iOS fullScreenCover).
             browserPresented && study != null ->
-                BrowserPlaceholder(model)
+                StudyBrowserScreen(model, study)
             study != null && phase is AppViewModel.Phase.Idle && pending == null ->
                 StudyHomeScreen(model, study)
             study == null && ended != null && phase is AppViewModel.Phase.Idle && pending == null ->
@@ -52,28 +48,14 @@ fun RootScreen(model: AppViewModel) {
             DebugHooks.DebugGearOverlay(model)
         }
     }
-}
 
-/// Interim browser surface — the WebView shell (injection, bridge,
-/// navigation policy) is phase a2.3–a2.5 / M4.
-@Composable
-private fun BrowserPlaceholder(model: AppViewModel) {
-    AuthPage {
-        Column(
-            modifier = Modifier.fillMaxWidth().brandCard().padding(24.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp),
-        ) {
-            BrandEyebrow("Study browser")
-            BrandNotice(
-                text = "The in-app study browser (WebView + tag injection) arrives in the next milestone (M4).",
-                background = Brand.infoBg,
-                foreground = Brand.infoText,
-            )
-            BrandPrimaryButton(
-                text = "Done",
-                onClick = { model.closeBrowser() },
-                modifier = Modifier.fillMaxWidth(),
-            )
+    // Lead surveys launch in a Custom Tab wherever the app is (browser up or
+    // a crash-recovered lead-out on foreground) — the iOS root/browser sheet
+    // pair collapses to one launcher on Android.
+    LaunchedEffect(leadSheet) {
+        leadSheet?.let { sheet ->
+            val launched = LeadSurveyLauncher.launch(context, sheet.url)
+            model.leadSheetLaunched(sheet, launched)
         }
     }
 }

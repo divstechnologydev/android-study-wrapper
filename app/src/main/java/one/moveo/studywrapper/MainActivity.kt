@@ -48,6 +48,13 @@ class MainActivity : ComponentActivity() {
         handleIntent(intent)
     }
 
+    override fun onResume() {
+        super.onResume()
+        // A lead-out queued while a lead survey Custom Tab was up gets its
+        // turn when we return (the iOS leadSheetDismissed retry, §a2.6).
+        model.presentDueLeadOut()
+    }
+
     private fun handleIntent(intent: Intent?) {
         // Debug-only QA hooks (intent extras); the release source set makes
         // this a no-op (§a2.7).

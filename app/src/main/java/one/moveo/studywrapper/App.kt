@@ -29,11 +29,19 @@ class App : Application() {
             debugLog = if (BuildConfig.DEBUG) {
                 { line -> Log.i("moveo-backend", line) }
             } else null,
+            assetLoader = { name ->
+                try {
+                    assets.open(name).bufferedReader().use { it.readText() }
+                } catch (_: Exception) {
+                    null
+                }
+            },
         )
     }
 
     override fun onCreate() {
         super.onCreate()
+        DebugHooks.appContext = this
         ProcessLifecycleOwner.get().lifecycle.addObserver(object : DefaultLifecycleObserver {
             override fun onStart(owner: LifecycleOwner) {
                 model.revalidate()
