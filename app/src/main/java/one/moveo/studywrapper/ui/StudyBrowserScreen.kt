@@ -41,6 +41,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import one.moveo.studywrapper.AppViewModel
 import one.moveo.studywrapper.DebugHooks
+import one.moveo.studywrapper.StoreSupport
 import one.moveo.studywrapper.browser.LeadSurveyLauncher
 import one.moveo.studywrapper.browser.StudyWebViewController
 import one.moveo.studywrapper.browser.isWebViewSupported
@@ -199,7 +200,9 @@ fun StudyBrowserScreen(model: AppViewModel, study: ActiveStudy) {
 
 /// §a0.3: no fallback injection path. evaluateJavascript-at-onPageStarted is
 /// racy (misses the tag's synchronous early events) and would silently
-/// produce non-parity data — worse than refusing.
+/// produce non-parity data — worse than refusing. Wording and the optional
+/// store link come from the per-flavor StoreSupport (§h1) — the huawei
+/// binary must not link to Google Play.
 @Composable
 private fun WebViewUpdateGate(model: AppViewModel) {
     val context = LocalContext.current
@@ -209,26 +212,25 @@ private fun WebViewUpdateGate(model: AppViewModel) {
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
             Text(
-                "Update Android System WebView",
+                StoreSupport.webViewUpdateTitle,
                 fontSize = 20.sp,
                 fontWeight = FontWeight.SemiBold,
                 color = Brand.text,
             )
             BrandNotice(
-                text = "This device's web engine is too old for the study browser. Please update “Android System WebView” from Google Play and try again.",
+                text = StoreSupport.webViewUpdateNotice,
                 background = Brand.infoBg,
                 foreground = Brand.infoText,
             )
-            BrandPrimaryButton(
-                text = "Open Google Play",
-                onClick = {
-                    LeadSurveyLauncher.launch(
-                        context,
-                        "https://play.google.com/store/apps/details?id=com.google.android.webview",
-                    )
-                },
-                modifier = Modifier.fillMaxWidth(),
-            )
+            val actionLabel = StoreSupport.webViewUpdateActionLabel
+            val actionUrl = StoreSupport.webViewUpdateActionUrl
+            if (actionLabel != null && actionUrl != null) {
+                BrandPrimaryButton(
+                    text = actionLabel,
+                    onClick = { LeadSurveyLauncher.launch(context, actionUrl) },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
             BrandGhostButton(
                 text = "Close",
                 onClick = { model.closeBrowser() },
