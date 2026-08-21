@@ -27,11 +27,17 @@ the `app/src/release` source set replaces every hook with a no-op, so the
 binary is pinned to the prod backend and the strict config guard. Nothing to
 strip manually; a release build *cannot* expose debug features.
 
+Orthogonally, two **store flavors** (docs/plan.md §h1): `play` (Google Play)
+and `huawei` (AppGallery). They differ only in the per-flavor `StoreSupport`
+object (store links + wording — the huawei binary contains no Google Play
+URLs); everything else is identical, including versionCode/versionName.
+Day-to-day development uses `playDebug`.
+
 ### Debug build (development / dev backend)
 
 ```sh
 # Build + install on the connected device/emulator
-./gradlew :app:installDebug
+./gradlew :app:installPlayDebug
 
 # Launch pointed at the DEV environment (the override persists in prefs;
 # also settable later via the in-app gear → "Config API base override")
@@ -64,15 +70,62 @@ adb logcat -s moveo-backend moveo-events
 ### Release build (prod)
 
 ```sh
-./gradlew :app:assembleRelease   # → app/build/outputs/apk/release/ (unsigned)
-./gradlew :app:bundleRelease     # → .aab for Play upload
+./gradlew :app:bundlePlayRelease      # → .aab for Play Console upload
+./gradlew :app:assembleHuaweiRelease  # → signed .apk for AppGallery Connect
 ```
 
 Release is hard-pinned to production (`pigeon.moveo.one` config API, the
 baked tag ingest endpoint): intent extras are ignored, there is no gear or
 settings screen, no event spy, no ingest redirect, and no cleartext config.
-Signing for distribution is set up in phase a4; until then the release APK is
-build-verifiable (`unzip -l`/`aapt` audits) but not device-installable.
+
+Signing (docs/plan.md §h2): one keystore serves as the Play **upload** key
+(Play App Signing re-signs for distribution) and the AppGallery
+**distribution** key. Secrets come from `moveo.keystore.*` entries in
+`local.properties` (git-ignored) or `MOVEO_KEYSTORE_*` env vars on CI; with
+neither present the release build is unsigned but still build-verifiable
+(`unzip -l`/`aapt` audits). The keystore file and password must be backed
+up — the AppGallery key is unrecoverable if lost.
+
+## Releasing (Google Play + Huawei AppGallery)
+
+Every release ships to **both stores from the same commit, with the same
+`versionCode`/`versionName`** — never let the stores drift.
+
+**1. Bump the version** in `app/build.gradle.kts` (`versionCode` +1, set
+`versionName`), commit.
+
+**2. Pre-release checks** (all must pass before any upload):
+
+```sh
+./gradlew build                                # all modules, all variants, tests
+./gradlew :app:bundlePlayRelease :app:assembleHuaweiRelease
+
+# huawei binary carries no rival-store links (AppGallery rejects them) — must print 0
+unzip -p app/build/outputs/apk/huawei/release/app-huawei-release.apk "classes*.dex" \
+  | grep -c "play.google.com"
+
+# both artifacts signed with the pinned cert (SHA-256 in plan.md §h2)
+apksigner verify --print-certs app/build/outputs/apk/huawei/release/app-huawei-release.apk
+keytool -printcert -jarfile app/build/outputs/bundle/playRelease/app-play-release.aab
+```
+
+Then the release smoke test on a device/emulator: install the huawei APK
+(uninstall any debug build first — different signature), no gear icon, a
+bogus code round-trips to prod ("Code not recognized").
+
+**3. Google Play** — upload `app-play-release.aab` in Play Console:
+closed-testing track first, then promote to production ([plan §a4.2–a4.3](docs/plan.md):
+Data safety form and listing must mirror the iOS privacy labels; include a
+working prod test code in the review notes).
+
+**4. Huawei AppGallery** — upload `app-huawei-release.apk` in AppGallery
+Connect and submit for review (1–3 business days). Full walkthrough —
+account setup, privacy declaration answers, reviewer notes, Cloud Debugging
+test on a real GMS-less device: [docs/h3-appgallery.md](docs/h3-appgallery.md).
+
+**5. After both are live**, tag the commit (`v<versionName>`). First-release
+extras — store listing assets, privacy policy URL, App Links fingerprints —
+are tracked in [plan §a4 and §h](docs/plan.md).
 
 ## Sibling repos (read-only dependencies)
 
@@ -89,5 +142,5 @@ the updated extension repo, commit the new `VENDOR.json`
 (commit hash + sha256 is the provenance), re-run the fixture suite and the
 a3.1 parity diff, then release. Never edit `assets/moveo-one.js`.
 
-**Exit criteria (a4):** production release on Google Play; pilot study data
-verified comparable with desktop/iOS cohorts.
+**Exit criteria (a4 + h):** production release on Google Play and Huawei
+AppGallery; pilot study data verified comparable with desktop/iOS cohorts.

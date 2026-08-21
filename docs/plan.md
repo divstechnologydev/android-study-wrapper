@@ -425,6 +425,74 @@ verified comparable with desktop/iOS cohorts.
 
 ---
 
+## Phase h — Huawei AppGallery distribution
+
+The app has **zero GMS/Firebase dependencies**, so no HMS SDK is needed —
+the Play/Huawei split is store links and wording only. h1–h2 are local
+code/build work; h3 is store admin (slow — start early); h4 rides with a1.
+
+### h1 Store flavor split
+
+- `store` flavor dimension: `play` / `huawei`. Same applicationId, same
+  versionCode/versionName across both stores (one support/debug story).
+- The only per-store facts live in a per-flavor `StoreSupport` object
+  (`src/play` / `src/huawei`, same pattern as the `DebugHooks`
+  debug/release split): the WebView-update gate's wording plus an optional
+  store link. Nothing else may branch on store.
+- The huawei binary must not contain Google Play URLs (AppGallery review
+  rejects apps that direct users to Google Play); the Play deep link exists
+  only in `src/play`. On GMS-less devices the WebView provider is not
+  `com.google.android.webview`, so the huawei gate points at system
+  updates/AppGallery instead.
+- Exit: `assemblePlayDebug` + `assembleHuaweiDebug` + tests green;
+  `huaweiRelease` dex contains no `play.google.com`.
+
+### h2 Release signing & artifacts (with a4)
+
+- One release keystore, used as the Play **upload key** and the AppGallery
+  **distribution key** (Play App Signing re-signs the Play build anyway).
+  Secrets via `local.properties` `moveo.keystore.*` / `MOVEO_KEYSTORE_*`
+  env — never committed. Keystore: `../keys/studywrapper-release.jks`
+  (outside the repo; **back up file + password** — the AppGallery key is
+  unrecoverable). Upload/distribution cert SHA-256 (for h4 assetlinks +
+  AppGallery signature):
+  `26:70:28:65:8D:82:FD:8C:85:F7:6E:F7:75:4D:AC:78:0B:4C:A6:8A:5D:0C:1E:81:DB:4B:1B:9A:12:6B:C4:BE`
+  (Play adds its own App Signing cert on top — fetch that from Play Console
+  when a1.1 lands).
+- Artifacts: `bundlePlayRelease` (AAB → Play Console) and
+  `assembleHuaweiRelease` (APK → AppGallery Connect).
+- Consequence: the two store builds carry different final signatures — a
+  device can never cross-update between stores (accepted).
+- Exit: both artifacts build signed; huaweiRelease passes the a4.2 smoke
+  test (no gear icon, config GETs hit prod only).
+
+### h3 AppGallery Connect listing
+
+Full operational checklist: **docs/h3-appgallery.md** (account
+registration, privacy-declaration answers, review notes, Cloud Debugging
+test plan).
+
+- Huawei developer account (enterprise verification: DUNS **or** business
+  registry code + license copy; verification 1–2 working days, a new DUNS
+  can take weeks — the long pole), app with the same package name, privacy
+  declaration mirroring the Play Data safety answers so all store
+  declarations tell one story.
+- Test on a real GMS-less device via AppGallery Connect **Cloud
+  Debugging** (the emulator cannot simulate no-GMS); verify enroll flow and
+  the WebView gate there. Submit with a working prod test code (a4.2).
+- Exit: approved and live on AppGallery.
+
+### h4 App Links dual-store (rides with a1)
+
+- `assetlinks.json` lists **both** SHA-256 fingerprints: the Play App
+  Signing key and the h2 distribution key.
+- GMS-less Huawei devices below Android 12 never auto-verify https App
+  Links (the verifier was a GMS component) — `moveoone://` (a1.2) is the
+  reliable path there; the a1.3 landing page serves the AppGallery badge +
+  scheme link for Huawei user agents.
+
+---
+
 ## 5. Milestones (acceptance-criteria checklist)
 
 | # | Deliverable | Accepted when |
