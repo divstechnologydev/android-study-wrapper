@@ -121,18 +121,26 @@ class ConfigService(
         val alreadyEnrolled: Boolean,
     )
 
-    /// Called exactly once per activation, after the participant accepts
-    /// consent. `consentTextVersion` must be the exact version of the wording
-    /// that was displayed — it is the server-side GDPR audit reference.
+    /// Called after the participant accepts consent; retried with the SAME
+    /// `enrollmentId` if the participant taps Accept again after a network
+    /// failure. `transactionId` is the optional panel-provider id from the
+    /// setup link — sent only when present so the request is unchanged for
+    /// plain links and typed codes (extension parity: key absent, not null).
+    /// `consentTextVersion` must be the exact version of the wording that
+    /// was displayed — it is the server-side GDPR audit reference.
     suspend fun enroll(
         code: String,
         participantId: String,
+        enrollmentId: String,
+        transactionId: String? = null,
         consentTextVersion: String,
     ): ApiResult<EnrollSuccess, EnrollError> {
         val normalized = Codes.normalize(code) ?: return ApiResult.Failure(EnrollError.Validation)
         val url = apiBase.newBuilder().addPathSegment(normalized).addPathSegment("enroll").build()
         val body = buildJsonObject {
             put("participantId", participantId)
+            put("enrollmentId", enrollmentId)
+            if (transactionId != null) put("transactionId", transactionId)
             put("consent", true)
             put("consentTextVersion", consentTextVersion)
             put("extensionVersion", "${BackendConstants.CLIENT_MARKER}/$appVersion")

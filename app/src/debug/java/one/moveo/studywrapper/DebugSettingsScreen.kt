@@ -107,6 +107,18 @@ fun DebugSettingsScreen(model: AppViewModel, onDone: () -> Unit) {
 
         HorizontalDivider(color = Brand.border)
 
+        BrandEyebrow("Active study (a1.4 ids)")
+        val active = model.activeStudy.collectAsState().value
+        MonoValue("enrollment id: ${active?.enrollmentId ?: "—"}")
+        MonoValue("transaction id: ${active?.transactionId ?: "—"}")
+        Text(
+            "Enrollment ID is minted per activation and sent with the enroll call. Transaction ID comes only from a setup link (?transaction_id=…) and is echoed on the lead-out URL. “—” = none (typed code, plain link, or a study enrolled before this build).",
+            fontSize = 12.sp,
+            color = Brand.textSecondary,
+        )
+
+        HorizontalDivider(color = Brand.border)
+
         BrandEyebrow("Tag health")
         val tagHost = model.tagInitializedHost.collectAsState().value
         MonoValue(tagHost?.let { "last init ping: $it" } ?: "— (open the browser on a study page)")

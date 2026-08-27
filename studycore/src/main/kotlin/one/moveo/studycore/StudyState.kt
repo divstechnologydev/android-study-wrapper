@@ -30,6 +30,12 @@ data class ActiveStudy(
     val code: String,
     val config: StudyConfig,
     val enrolledAt: Instant? = null,
+    /// Client-minted `e_<uuid>` sent with the enroll call. Nullable only so
+    /// records persisted by pre-enrollment-id builds keep decoding.
+    val enrollmentId: String? = null,
+    /// Panel-provider id from the setup link (`?transaction_id=…`), echoed on
+    /// the lead-out URL. null for code-typed activations and plain links.
+    val transactionId: String? = null,
     /// Once per participant per study; never unset by later navigation.
     val targetFired: Boolean = false,
     val targetFiredAt: Instant? = null,

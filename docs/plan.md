@@ -182,6 +182,13 @@ exists for iOS; the two coexist in `.well-known/`. Tapping a setup link with
 the app installed opens the app directly; the code takes the exact
 fetch → validate → confirm path of a typed code (`SetupLink.kt`).
 
+*Status 2026-08-27: app side done — `autoVerify` filter in the main
+manifest, a debug-overlay filter for `dev-app.moveo.one` deliberately
+without `autoVerify` (Android 6–11 verifies all-or-nothing across autoVerify
+hosts), `MainActivity` intent rules (fresh-instance only, `setIntent` on
+`onNewIntent`, Recents relaunch skipped). `assetlinks.json` pending on the
+platform team (README "Setup links" has the file to publish).*
+
 ### a1.2 Custom scheme fallback
 
 `moveoone://config/<code>` — same scheme as iOS, so the landing page's
@@ -193,12 +200,28 @@ intent filter; used by QA scripts and by mail clients that wrap https links.
 The mobile-aware landing page at `app.moveo.one/extension/config/<code>`
 already exists for iOS (App Store badge + code display). Add the Google Play
 badge + Play deep link for Android user agents. Owned by the platform repo;
-this app only depends on it.
+this app only depends on it. The "Open in app" button must forward
+`?transaction_id=` verbatim (a1.4).
+
+### a1.4 Link-first activation, transaction id, client enrollment id
+
+Port of the iOS `transactions-track` branch / extension `enrollment-id`
+branch (2026-08-27): the setup link becomes the only UI entry (manual code
+field removed), links may carry the panel provider's `?transaction_id=`
+(validated `^[A-Za-z0-9_-]{1,256}$`, sent as `transactionId` in the enroll
+body, echoed as `transaction_id` on the **lead-out** URL only), and the app
+mints `enrollmentId` (`e_<uuid>`) once per activation before the first
+enroll call. Full plan, port map, Android intent-delivery rules and test
+matrix: [docs/a1-transactions.md](a1-transactions.md). *Status 2026-08-27:
+steps 1–3 done (studycore + 20 tests, model/activity/manifest + 12 app JVM
+tests, link-only activation card, gear ids); verified on the emulator vs the
+mock; step 4 (physical device) pending.*
 
 **Exit criteria:** `adb shell am start -a android.intent.action.VIEW -d
-"https://app.moveo.one/extension/config/<code>"` opens the app into the
-confirmation sheet on a release-signed build; scheme link does the same.
-(a2 can proceed in parallel using typed codes + the scheme.)
+"https://app.moveo.one/extension/config/<code>?transaction_id=tx"` opens the
+app into the confirmation sheet on a release-signed build; scheme link does
+the same; the mock's enroll log shows `enrollmentId e_…, transactionId tx`
+and the lead-out Custom Tab URL carries `transaction_id=tx`.
 
 ---
 

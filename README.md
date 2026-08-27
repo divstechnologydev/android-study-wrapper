@@ -4,8 +4,11 @@ Android participant app for Moveo One research studies — activation, consent,
 and a locked-down in-app browser (WebView) that injects the Moveo analytics
 tag into the study's websites. The Android sibling of the iOS study wrapper.
 
-**Status: in progress.** Phase a0 done (project skeleton: `:app` +
-`:studycore`, vendored tag + fixtures, `scripts/`); implementation follows
+**Status: in progress.** Phases a0–a3.2 (skeleton, `:studycore` port,
+activation/consent/browser, parity capture, feature matrix), h1–h2 (store
+flavors, signing) and a1.4 (link-first activation with transaction id +
+client enrollment id) are done; open items are platform-side (assetlinks,
+landing page) and release paperwork. Implementation follows
 [docs/plan.md](docs/plan.md) phase by phase. Build: `./gradlew build`; unit
 tests: `./gradlew :studycore:test`. [docs/](docs/) is the plan and context
 package:
@@ -57,15 +60,78 @@ adb reverse tcp:8787 tcp:8787           # emulator → host
 ```
 
 Other debug-only intent extras (scripted QA): `MOVEO_AUTO_CODE` (activate a
-code on launch), `MOVEO_AUTO_FLOW consent|enroll|browser` (auto-step to that
-screen), `MOVEO_AUTO_NAV <url>` (navigate the live study browser; also
-accepts `javascript:` URLs), `MOVEO_INGEST_OVERRIDE <url>` (explicit event
-reroute). Watch backend calls, bridge messages, lead launches, and spied
-events:
+code — or a full setup link — on launch), `MOVEO_AUTO_FLOW
+consent|enroll|browser` (auto-step to that screen), `MOVEO_AUTO_NAV <url>`
+(navigate the live study browser; also accepts `javascript:` URLs),
+`MOVEO_INGEST_OVERRIDE <url>` (explicit event reroute). Watch backend calls,
+link arrivals, bridge messages, lead launches, and spied events:
 
 ```sh
 adb logcat -s moveo-backend moveo-events
 ```
+
+## Setup links (deep links)
+
+The setup link is the **only** way into a study — manual code entry is
+intentionally not in the UI (a typed code cannot carry the panel provider's
+transaction id; the model still accepts one via `codeInput` for the DEBUG
+`MOVEO_AUTO_CODE` hook, so re-adding the field later is UI-only). Both link
+shapes land in `MainActivity.handleIntent` → `AppViewModel.handleOpenUrl`
+and go through fetch → confirm → consent ([docs/a1-transactions.md](docs/a1-transactions.md)):
+
+| Form | Example | Opens the app when |
+|---|---|---|
+| App Link | `https://app.moveo.one/extension/config/<code>?transaction_id=…` | Tapped from another app (Mail, Messages, a panel app) or the browser — **requires the `assetlinks.json` below**; otherwise the browser shows the landing page |
+| Custom scheme | `moveoone://config/<code>?transaction_id=…` | Tapped anywhere (the landing page's "Open in app" button, QA); only when the app is installed. **The reliable path on GMS-less Huawei devices below Android 12**, which never auto-verify App Links |
+
+`?transaction_id=` is the optional panel-provider id (`[A-Za-z0-9_-]{1,256}`,
+anything else is dropped, never blocks activation). It is sent as
+`transactionId` in the enroll body and echoed on the **lead-out** URL as
+`transaction_id` — byte-identical to the extension and iOS. The app also
+mints `enrollmentId` (`e_<uuid>`) once per activation, before the first
+enroll call, and reuses it on consent-screen retries.
+
+App Links need two things:
+
+1. The manifest intent filter (`android:autoVerify="true"` for
+   `app.moveo.one/extension/config/`; debug builds add `dev-app.moveo.one`
+   without autoVerify). Already in place.
+2. `https://app.moveo.one/.well-known/assetlinks.json` (platform team)
+   listing **both** signing certificates — the Play App Signing key and the
+   AppGallery distribution key (plan §h4); add the debug cert for internal
+   builds. The Android counterpart of the iOS AASA; they coexist in
+   `.well-known/`:
+
+   ```json
+   [{
+     "relation": ["delegate_permission/common.handle_all_urls"],
+     "target": {
+       "namespace": "android_app",
+       "package_name": "one.moveo.studywrapper",
+       "sha256_cert_fingerprints": [
+         "<PLAY APP SIGNING SHA-256>",
+         "26:70:28:65:8D:82:FD:8C:85:F7:6E:F7:75:4D:AC:78:0B:4C:A6:8A:5D:0C:1E:81:DB:4B:1B:9A:12:6B:C4:BE"
+       ]
+     }
+   }]
+   ```
+
+QA on the emulator (the scheme works before any assetlinks exists; `-n`
+delivers an https link without consulting verification):
+
+```sh
+adb shell am start -a android.intent.action.VIEW \
+  -d "moveoone://config/TESTCODE1234?transaction_id=tx_qa_001"
+adb shell am start -a android.intent.action.VIEW -n one.moveo.studywrapper/.MainActivity \
+  -d "https://app.moveo.one/extension/config/TESTCODE1234?transaction_id=tx_qa_001"
+adb shell pm get-app-links one.moveo.studywrapper      # per-domain verification state (Android 12+)
+adb shell pm verify-app-links --re-verify one.moveo.studywrapper
+```
+
+Oracles: `adb logcat -s moveo-backend` prints `openURL code … transactionId …`
+on arrival and `lead: LEAD_OUT <url>` with the echoed id; the mock backend
+logs `enrollmentId …, transactionId …` on enroll; the gear screen shows the
+active study's ids.
 
 ### Release build (prod)
 

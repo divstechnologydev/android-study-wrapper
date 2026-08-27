@@ -20,7 +20,9 @@ import one.moveo.studycore.ConsentConstants
 import one.moveo.studycore.ConsentRecord
 import one.moveo.studycore.EndedStudy
 import one.moveo.studycore.EnrollError
+import one.moveo.studycore.Enrollment
 import one.moveo.studycore.FlowConstants
+import one.moveo.studycore.LeadUrl
 import one.moveo.studycore.Origins
 import one.moveo.studycore.ScriptBuilder
 import one.moveo.studycore.SetupLink
@@ -47,12 +49,22 @@ class AppViewModel(
     /// class stays constructor-testable. Returns null when missing.
     private val assetLoader: (String) -> String? = { null },
     private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate),
+    /// Wall clock for every persisted timestamp and the lead-out due check;
+    /// injected so JVM tests can advance it in step with virtual time.
+    private val now: () -> Instant = { Instant.now() },
 ) {
     data class PendingActivation(
         val code: String,
         val config: StudyConfig,
         /// Name of the currently active study this activation would replace.
         val replacingName: String?,
+        /// Minted once per activation attempt, BEFORE the first enroll call,
+        /// so consent-screen retries resend the same id (extension parity:
+        /// "one id per enrollment, generated before the first attempt").
+        val enrollmentId: String,
+        /// Panel-provider id from the setup link; null for typed codes. A
+        /// fresh link for the same code may update it (fresh id wins).
+        val transactionId: String? = null,
     )
 
     sealed class Phase {
@@ -139,12 +151,77 @@ class AppViewModel(
             ConfigService(apiBase = apiBase, appVersion = appVersion)
         }
 
-    /// App Link / custom-scheme entry. A scheme-delivered code is treated
-    /// exactly like a typed one: fetch → validate → confirm.
+    /// Transaction id delivered by a setup link, waiting for the activation
+    /// of THAT code to consume it. Keyed by code so a lingering id can never
+    /// attach to a different code typed afterwards.
+    private data class LinkTransactionId(val code: String, val id: String)
+    private var linkTransactionId: LinkTransactionId? = null
+
+    /// App Link / custom-scheme entry (the extension's `source: "link"`
+    /// activation). A link-delivered code is treated exactly like a typed
+    /// one — fetch → validate → confirm — plus it may carry the
+    /// panel-provider transaction id.
     fun handleOpenUrl(url: String) {
-        val code = SetupLink.code(from = url) ?: return
-        codeInput.value = code
+        val link = SetupLink.parse(url) ?: return
+        // Codes/ids only — never the token or config (security §6); debug
+        // builds only (null sink in release).
+        debugLog?.invoke(
+            "openURL code ${link.code} transactionId ${link.transactionId ?: "-"} " +
+                "active ${store.activeStudy?.code ?: "-"} pending ${_pendingConfirmation.value?.code ?: "-"} " +
+                "phase ${_phase.value::class.simpleName}",
+        )
+
+        // Same code already active: idempotent, no re-fetch, no second
+        // enrollment (the extension's `alreadyActive`). Straight to home.
+        val active = store.activeStudy
+        if (active != null && active.code == link.code) {
+            _pendingConfirmation.value = null
+            linkTransactionId = null
+            codeInput.value = ""
+            _phase.value = Phase.Idle
+            _browserPresented.value = false
+            return
+        }
+
+        // Same code already mid-activation (summary sheet or consent screen):
+        // update in place instead of restarting — a transaction id on the
+        // fresh link wins over a stale or absent one.
+        _pendingConfirmation.value?.let { pending ->
+            if (pending.code == link.code) {
+                _pendingConfirmation.value =
+                    pending.copy(transactionId = link.transactionId ?: pending.transactionId)
+                _browserPresented.value = false
+                return
+            }
+        }
+        (_phase.value as? Phase.Consent)?.pending?.let { pending ->
+            if (pending.code == link.code) {
+                _phase.value = Phase.Consent(
+                    pending.copy(transactionId = link.transactionId ?: pending.transactionId),
+                )
+                return
+            }
+        }
+
+        linkTransactionId = link.transactionId?.let { LinkTransactionId(code = link.code, id = it) }
+        codeInput.value = link.code
+        // The confirmation sheet is owned by ActivationScreen — it cannot
+        // show under the study browser's full-screen cover.
+        _browserPresented.value = false
         activate()
+    }
+
+    private data class ResolvedInput(val code: String, val transactionId: String?)
+
+    /// `codeInput` accepts a bare code OR a pasted setup link (the only
+    /// manual path that keeps the transaction id). Returns the code and the
+    /// transaction id that applies to it.
+    private fun resolveInput(): ResolvedInput? {
+        val trimmed = codeInput.value.trim()
+        SetupLink.parse(trimmed)?.let { return ResolvedInput(it.code, it.transactionId) }
+        val code = Codes.normalize(trimmed) ?: return null
+        val linked = linkTransactionId?.takeIf { it.code == code }?.id
+        return ResolvedInput(code, linked)
     }
 
     fun activate() {
@@ -152,14 +229,16 @@ class AppViewModel(
     }
 
     suspend fun activateNow() {
-        val code = Codes.normalize(codeInput.value)
-        if (code == null) {
+        val input = resolveInput()
+        if (input == null) {
             _phase.value = Phase.Failed(
                 title = "Check the code",
-                message = "Study codes are 4–32 letters and numbers (dashes and spaces don't matter).",
+                message = "Study codes are 4–32 letters and numbers (dashes and spaces don't matter). " +
+                    "You can also paste the full setup link.",
             )
             return
         }
+        val code = input.code
         _phase.value = Phase.Fetching
         _pendingConfirmation.value = null
         when (val result = configService.fetchConfig(code = code)) {
@@ -171,7 +250,12 @@ class AppViewModel(
                     val replacing = store.activeStudy?.let { active ->
                         if (active.code == code) null else active.config.study.name
                     }
-                    val pending = PendingActivation(code = code, config = config, replacingName = replacing)
+                    val pending = PendingActivation(
+                        code = code, config = config, replacingName = replacing,
+                        enrollmentId = Enrollment.generateId(),
+                        transactionId = input.transactionId,
+                    )
+                    linkTransactionId = null // consumed by this activation
                     _phase.value = Phase.Idle
                     // Scripted QA (milestone smoke scripts, no UI interaction):
                     //   MOVEO_AUTO_FLOW=consent — jump to the consent screen
@@ -211,11 +295,14 @@ class AppViewModel(
 
     fun cancelActivation() {
         _pendingConfirmation.value = null
+        linkTransactionId = null
         _phase.value = Phase.Idle
     }
 
     /// Consent accepted → POST /enroll (the billing truth; 409 = success).
     /// Only after a successful enroll does the study become active locally.
+    /// Retries (Accept tapped again after a network error) reuse the
+    /// pending activation's enrollment id — never a new one per attempt.
     fun acceptConsent() {
         scope.launch { acceptConsentNow() }
     }
@@ -230,20 +317,24 @@ class AppViewModel(
             val result = configService.enroll(
                 code = pending.code,
                 participantId = participantId,
+                enrollmentId = pending.enrollmentId,
+                transactionId = pending.transactionId,
                 consentTextVersion = ConsentConstants.TEXT_VERSION,
             )
             when (result) {
                 is ApiResult.Success -> {
-                    val now = Instant.now()
+                    val acceptedAt = now()
                     store.consent = ConsentRecord(
-                        code = pending.code, acceptedAt = now, textVersion = ConsentConstants.TEXT_VERSION,
+                        code = pending.code, acceptedAt = acceptedAt, textVersion = ConsentConstants.TEXT_VERSION,
                     )
                     // Replaces any previous study wholesale (one active study per
                     // install; the confirmation sheet warned about the swap).
                     store.activeStudy = ActiveStudy(
                         code = pending.code,
                         config = pending.config,
-                        enrolledAt = parseIsoDate(result.value.enrolledAt) ?: now,
+                        enrolledAt = parseIsoDate(result.value.enrolledAt) ?: acceptedAt,
+                        enrollmentId = pending.enrollmentId,
+                        transactionId = pending.transactionId,
                     )
                     store.endedStudy = null
                     _activeStudy.value = store.activeStudy
@@ -275,9 +366,11 @@ class AppViewModel(
         }
     }
 
-    /// Decline ⇒ nothing stored, nothing tracked, no backend call.
+    /// Decline ⇒ nothing stored, nothing tracked, no backend call. The
+    /// pending activation (and its enrollment id) is discarded with it.
     fun declineConsent() {
         _consentError.value = null
+        linkTransactionId = null
         _phase.value = Phase.Idle
     }
 
@@ -289,6 +382,7 @@ class AppViewModel(
         store.endedStudy = null
         _activeStudy.value = null
         _endedStudy.value = null
+        linkTransactionId = null
         codeInput.value = ""
         _phase.value = Phase.Idle
     }
@@ -339,7 +433,7 @@ class AppViewModel(
         val ended = EndedStudy(
             code = study.code,
             name = study.config.study.name,
-            endedAt = Instant.now(),
+            endedAt = now(),
             leadOutUrl = study.config.flow.leadOutUrl,
             leadOutShownAt = study.leadOutShownAt,
             revoked = revoked,
@@ -418,7 +512,7 @@ class AppViewModel(
         if (study.leadInShownAt == null && !study.targetFired &&
             leadIn != null && _leadSheet.value == null
         ) {
-            leadUrl(leadIn, study.config.flow)?.let { url ->
+            LeadUrl.build(leadIn, study.config.flow, participantId = { store.participantId() })?.let { url ->
                 _leadSheet.value = LeadSheet(url = url, kind = LeadSheet.Kind.LEAD_IN)
             }
         }
@@ -448,7 +542,7 @@ class AppViewModel(
             "ownTag" -> {
                 val hostname = body["hostname"]?.lowercase()?.takeIf { it.isNotEmpty() } ?: return
                 if (store.ownTagHosts[hostname] == null) {
-                    store.ownTagHosts = store.ownTagHosts + (hostname to Instant.now())
+                    store.ownTagHosts = store.ownTagHosts + (hostname to now())
                     // Yield takes effect from the next page load on this host.
                     refreshUserScript()
                 }
@@ -467,11 +561,11 @@ class AppViewModel(
     /// written after the Custom Tab actually launches — lost lead-outs
     /// self-heal, shown ones never repeat.
     private fun targetReached(study: ActiveStudy) {
-        val now = Instant.now()
-        var updated = study.copy(targetFired = true, targetFiredAt = now)
+        val firedAt = now()
+        var updated = study.copy(targetFired = true, targetFiredAt = firedAt)
         if (updated.config.flow.leadOutUrl != null && updated.leadOutShownAt == null) {
             updated = updated.copy(
-                leadOutDueAt = now.plusMillis((FlowConstants.LEAD_OUT_DELAY_SECONDS * 1000).toLong()),
+                leadOutDueAt = firedAt.plusMillis((FlowConstants.LEAD_OUT_DELAY_SECONDS * 1000).toLong()),
             )
         }
         store.activeStudy = updated
@@ -487,15 +581,21 @@ class AppViewModel(
 
     /// Opens a due lead-out (fast path: the timer above; recovery path:
     /// app-foreground re-validation / activity resume after a Custom Tab
-    /// closes). No-ops while another sheet is pending.
+    /// closes). No-ops while another sheet is pending. The lead-out — and
+    /// only the lead-out — echoes the setup link's transaction id so the
+    /// panel provider can credit the completion (extension: openDueLeadOut).
     fun presentDueLeadOut() {
         val study = store.activeStudy ?: return
         val dueAt = study.leadOutDueAt ?: return
-        if (dueAt.isAfter(Instant.now())) return
+        if (dueAt.isAfter(now())) return
         if (study.leadOutShownAt != null) return
         if (_leadSheet.value != null) return
         val raw = study.config.flow.leadOutUrl ?: return
-        val url = leadUrl(raw, study.config.flow) ?: return
+        val url = LeadUrl.build(
+            raw, study.config.flow,
+            participantId = { store.participantId() },
+            transactionId = study.transactionId,
+        ) ?: return
         _leadSheet.value = LeadSheet(url = url, kind = LeadSheet.Kind.LEAD_OUT)
     }
 
@@ -512,23 +612,11 @@ class AppViewModel(
         debugLog?.invoke("lead: ${sheet.kind} ${sheet.url}")
         val study = store.activeStudy ?: return
         val updated = when (sheet.kind) {
-            LeadSheet.Kind.LEAD_IN -> study.copy(leadInShownAt = Instant.now())
-            LeadSheet.Kind.LEAD_OUT -> study.copy(leadOutShownAt = Instant.now(), leadOutDueAt = null)
+            LeadSheet.Kind.LEAD_IN -> study.copy(leadInShownAt = now())
+            LeadSheet.Kind.LEAD_OUT -> study.copy(leadOutShownAt = now(), leadOutDueAt = null)
         }
         store.activeStudy = updated
         _activeStudy.value = updated
-    }
-
-    /// Lead URL with the participant id appended — only when the study
-    /// author opted in (it hands the id to a third-party form tool).
-    private fun leadUrl(raw: String, flow: StudyConfig.Flow): String? {
-        val parsed = raw.toHttpUrlOrNull() ?: return null
-        if (!flow.appendParticipantId) return parsed.toString()
-        return parsed.newBuilder()
-            .removeAllQueryParameters("participantId")
-            .addQueryParameter("participantId", store.participantId())
-            .build()
-            .toString()
     }
 
     // MARK: - Leave with data clearing (a2.6)
