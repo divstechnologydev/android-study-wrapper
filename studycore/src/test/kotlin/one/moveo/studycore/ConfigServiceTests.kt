@@ -141,11 +141,15 @@ class ConfigServiceTests {
 
     // MARK: - enroll
 
+    private fun lastBodyJson(): JsonObject =
+        Json.parseToJsonElement(server.takeRequest().body.readUtf8()).jsonObject
+
     @Test
     fun enrollBodyCarriesClientMarker() = runBlocking {
         respond(201, body = "{\"participantId\":\"p_abc\",\"enrolledAt\":\"2026-08-18T10:00:00Z\"}")
         val result = service(appVersion = "1.2.3").enroll(
-            code = "test code 1234", participantId = "p_abc", consentTextVersion = "android-2026-08-18",
+            code = "test code 1234", participantId = "p_abc", enrollmentId = "e_1",
+            consentTextVersion = "android-2026-08-18",
         )
         val success = checkNotNull(result.valueOrNull) { "expected success, got $result" }
         assertEquals("p_abc", success.participantId)
@@ -164,9 +168,36 @@ class ConfigServiceTests {
     }
 
     @Test
+    fun enrollBodyCarriesEnrollmentIdAndOmitsAbsentTransactionId() = runBlocking {
+        respond(201, body = "{\"participantId\":\"p_abc\"}")
+        service().enroll(
+            code = "TESTCODE1234", participantId = "p_abc", enrollmentId = "e_0f6c2d", consentTextVersion = "v",
+        )
+        val body = lastBodyJson()
+        assertEquals("always sent", "e_0f6c2d", body["enrollmentId"]?.jsonPrimitive?.content)
+        // Extension parity: plain links / typed codes leave the request
+        // unchanged — the key must be ABSENT, not null.
+        assertFalse(body.containsKey("transactionId"))
+    }
+
+    @Test
+    fun enrollBodyCarriesTransactionIdWhenPresent() = runBlocking {
+        respond(201, body = "{\"participantId\":\"p_abc\"}")
+        service().enroll(
+            code = "TESTCODE1234", participantId = "p_abc", enrollmentId = "e_0f6c2d",
+            transactionId = "tx_8f31-AbC_9", consentTextVersion = "v",
+        )
+        val body = lastBodyJson()
+        assertEquals("e_0f6c2d", body["enrollmentId"]?.jsonPrimitive?.content)
+        assertEquals("tx_8f31-AbC_9", body["transactionId"]?.jsonPrimitive?.content)
+    }
+
+    @Test
     fun conflictIsSuccess() = runBlocking {
         respond(409, body = "{\"participantId\":\"p_abc\",\"enrolledAt\":\"2026-08-01T09:00:00Z\"}")
-        val result = service().enroll(code = "TESTCODE1234", participantId = "p_abc", consentTextVersion = "v")
+        val result = service().enroll(
+            code = "TESTCODE1234", participantId = "p_abc", enrollmentId = "e_1", consentTextVersion = "v",
+        )
         val success = checkNotNull(result.valueOrNull) { "409 must be success, got $result" }
         assertTrue(success.alreadyEnrolled)
         assertEquals("2026-08-01T09:00:00Z", success.enrolledAt)
@@ -183,7 +214,9 @@ class ConfigServiceTests {
         )
         for ((status, expected) in cases) {
             respond(status)
-            val result = service().enroll(code = "TESTCODE1234", participantId = "p_x", consentTextVersion = "v")
+            val result = service().enroll(
+                code = "TESTCODE1234", participantId = "p_x", enrollmentId = "e_1", consentTextVersion = "v",
+            )
             assertEquals("status $status", expected, result.errorOrNull)
             server.takeRequest(1, TimeUnit.SECONDS)
         }

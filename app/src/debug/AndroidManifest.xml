@@ -1,9 +1,29 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Debug manifest overlay: cleartext-to-localhost config for the mock
-     backend (§a2.7) and the parity-capture export FileProvider (§a3.1).
-     Merged only into debug builds. -->
+     backend (§a2.7), the parity-capture export FileProvider (§a3.1) and the
+     dev-platform setup-link host (§a1.4). Merged only into debug builds. -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <application android:networkSecurityConfig="@xml/network_security_config">
+        <!-- Debug builds also open dev-platform setup links (the iOS Debug
+             entitlement's `dev-app.moveo.one`). Deliberately WITHOUT
+             autoVerify: on Android 6–11 App Link verification is
+             all-or-nothing across every autoVerify host, so an unverifiable
+             dev host must never share the prod host's verified filter. The
+             merger appends this filter to the main manifest's activity;
+             release manifests carry the prod host only. -->
+        <activity
+            android:name=".MainActivity"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="https" />
+                <data android:host="dev-app.moveo.one" />
+                <data android:pathPrefix="/extension/config/" />
+            </intent-filter>
+        </activity>
+
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.debugfiles"

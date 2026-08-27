@@ -25,9 +25,9 @@
         android:fullBackupContent="@xml/backup_rules"
         android:dataExtractionRules="@xml/data_extraction_rules">
 
-        <!-- Single activity, portrait-locked v1 (docs/plan.md §a0.6).
-             Deep-link intent filters (App Links + moveoone:// scheme) land in
-             phase a1. -->
+        <!-- Single activity, portrait-locked v1 (docs/plan.md §a0.6). Setup
+             links (§a1) arrive through the two VIEW filters below and land
+             in MainActivity.handleIntent → AppViewModel.handleOpenUrl. -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
@@ -37,6 +37,36 @@
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+
+            <!-- a1.1 App Link:
+                 https://app.moveo.one/extension/config/<code>[?transaction_id=…]
+                 Opens the app directly once the platform publishes
+                 https://app.moveo.one/.well-known/assetlinks.json listing this
+                 package (§h4: BOTH the Play App Signing and the AppGallery
+                 distribution fingerprints). Where verification is absent
+                 (assetlinks not yet live, GMS-less devices below Android 12)
+                 the link opens the browser → landing page → the scheme link
+                 below. Same filter for both store flavors. -->
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="https" />
+                <data android:host="app.moveo.one" />
+                <data android:pathPrefix="/extension/config/" />
+            </intent-filter>
+
+            <!-- a1.2 Custom scheme: moveoone://config/<code>[?transaction_id=…]
+                 — the landing page's "Open in app" button, QA scripts, mail
+                 clients that wrap https links. Kept as a SEPARATE filter:
+                 autoVerify must never cover a custom scheme. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="moveoone" />
+                <data android:host="config" />
             </intent-filter>
         </activity>
     </application>

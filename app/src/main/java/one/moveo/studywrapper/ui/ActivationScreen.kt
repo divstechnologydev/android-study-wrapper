@@ -1,10 +1,6 @@
 package one.moveo.studywrapper.ui
 
 import androidx.compose.foundation.Image
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -17,10 +13,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.BasicTextField
-import androidx.compose.foundation.text.KeyboardActions
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -30,29 +22,30 @@ import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.ImeAction
-import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import one.moveo.studywrapper.AppViewModel
 import one.moveo.studywrapper.R
 import one.moveo.studycore.Codes
 
-/// Screen 1 of 3: code entry → fetch → validate → confirmation sheet
-/// (← iOS ActivationView.swift). Consumes typed/pasted codes and codes
-/// arriving via setup links. Composition mirrors the extension's auth pages
-/// (brand kit v3): faint constellation background, centered wordmark, one
-/// elevated card.
+/// Screen 1 of 3: setup link → fetch → validate → confirmation sheet
+/// (← iOS ActivationView.swift). Links only for now: the extension popup's
+/// "Link not working? Enter the code manually" fallback is deliberately NOT
+/// shown (product decision 2026-08-27) — a typed code cannot carry the panel
+/// provider's transaction id, so participants are steered to the link. The
+/// model still accepts a code/link in `codeInput` (deep links, DEBUG
+/// MOVEO_AUTO_CODE), so re-adding the field later is UI-only. Composition
+/// mirrors the extension's auth pages (brand kit v3): faint constellation
+/// background, centered wordmark, one elevated card.
 @Composable
 fun ActivationScreen(model: AppViewModel) {
     val phase by model.phase.collectAsState()
@@ -111,13 +104,13 @@ fun AuthPage(content: @Composable () -> Unit) {
     }
 }
 
+/// Link-only entry card (popup.html `.explainer`, without the manual
+/// disclosure). While a link is being resolved it shows progress so a tap
+/// on a slow network doesn't look like nothing happened.
 @Composable
 private fun EntryCard(model: AppViewModel) {
     val phase by model.phase.collectAsState()
-    val codeInput by model.codeInput.collectAsState()
     val fetching = phase is AppViewModel.Phase.Fetching
-    val interaction = remember { MutableInteractionSource() }
-    val focused by interaction.collectIsFocusedAsState()
 
     Column(
         modifier = Modifier.fillMaxWidth().brandCard().padding(24.dp),
@@ -125,79 +118,33 @@ private fun EntryCard(model: AppViewModel) {
     ) {
         BrandEyebrow("Join research study")
         Text(
-            text = "Taking part in a Moveo One research study? Open the setup link from your study invitation, or enter the code you received.",
+            text = buildAnnotatedString {
+                append("Taking part in a Moveo One research study? Open the ")
+                withStyle(SpanStyle(fontWeight = FontWeight.SemiBold, color = Brand.text)) {
+                    append("setup link")
+                }
+                append(" from your study invitation — it sets everything up automatically.")
+            },
             fontSize = 14.sp,
             lineHeight = 20.sp,
             color = Brand.textSecondary,
         )
 
-        Column(verticalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.padding(top = 4.dp)) {
-            BrandEyebrow("Setup code")
-            BasicTextField(
-                value = codeInput,
-                onValueChange = { model.codeInput.value = it },
-                enabled = !fetching,
-                singleLine = true,
-                interactionSource = interaction,
-                textStyle = TextStyle(
-                    fontSize = 16.sp,
-                    fontFamily = FontFamily.Monospace,
-                    color = Brand.text,
-                ),
-                cursorBrush = SolidColor(Brand.text),
-                keyboardOptions = KeyboardOptions(
-                    capitalization = KeyboardCapitalization.Characters,
-                    autoCorrectEnabled = false,
-                    imeAction = ImeAction.Go,
-                ),
-                keyboardActions = KeyboardActions(onGo = { model.activate() }),
-                decorationBox = { inner ->
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(44.dp)
-                            .clip(RoundedCornerShape(Brand.radiusSM))
-                            .background(if (focused) Brand.bgElevated else Brand.bgSunken)
-                            .border(
-                                1.dp,
-                                if (focused) Brand.text else Brand.border,
-                                RoundedCornerShape(Brand.radiusSM),
-                            )
-                            .padding(horizontal = 12.dp),
-                        contentAlignment = Alignment.CenterStart,
-                    ) {
-                        if (codeInput.isEmpty()) {
-                            Text(
-                                "e.g. 4831",
-                                fontSize = 16.sp,
-                                fontFamily = FontFamily.Monospace,
-                                color = Brand.textMuted,
-                            )
-                        }
-                        inner()
-                    }
-                },
+        if (fetching) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.padding(top = 4.dp),
+            ) {
+                CircularProgressIndicator(modifier = Modifier.size(18.dp), color = Brand.text, strokeWidth = 2.dp)
+                Text("Loading your study…", fontSize = 13.sp, color = Brand.textSecondary)
+            }
+        } else {
+            Text(
+                "Don't have a link? Ask the study team for your invitation.",
+                fontSize = 12.sp,
+                color = Brand.textMuted,
             )
-            Codes.normalize(codeInput)?.let { normalized ->
-                Text(
-                    text = Codes.group(normalized),
-                    fontSize = 12.sp,
-                    fontFamily = FontFamily.Monospace,
-                    color = Brand.textMuted,
-                )
-            }
-        }
-
-        BrandPrimaryButton(
-            onClick = { model.activate() },
-            enabled = Codes.normalize(codeInput) != null && !fetching,
-            modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
-        ) { fg ->
-            if (fetching) {
-                CircularProgressIndicator(modifier = Modifier.size(20.dp), color = fg, strokeWidth = 2.dp)
-            } else {
-                Text("Activate", fontSize = 15.sp, fontWeight = FontWeight.Medium, color = fg)
-            }
         }
     }
 }
@@ -307,4 +254,3 @@ fun StudySummarySheet(model: AppViewModel, pending: AppViewModel.PendingActivati
         }
     }
 }
-
