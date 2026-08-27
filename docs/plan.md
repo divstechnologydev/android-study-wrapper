@@ -215,7 +215,8 @@ enroll call. Full plan, port map, Android intent-delivery rules and test
 matrix: [docs/a1-transactions.md](a1-transactions.md). *Status 2026-08-27:
 steps 1–3 done (studycore + 20 tests, model/activity/manifest + 12 app JVM
 tests, link-only activation card, gear ids); verified on the emulator vs the
-mock; step 4 (physical device) pending.*
+mock and on the Galaxy A52s against dev (step 4). App side complete;
+`assetlinks.json` + landing page remain platform-side.*
 
 **Exit criteria:** `adb shell am start -a android.intent.action.VIEW -d
 "https://app.moveo.one/extension/config/<code>?transaction_id=tx"` opens the

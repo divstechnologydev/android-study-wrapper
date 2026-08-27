@@ -9,8 +9,11 @@ review plan; implementation follows step by step (each step ends testable).
 **Status:** Steps 1–3 done 2026-08-27 (`./gradlew build` green: 84 studycore
 + 12 app JVM tests; emulator journey vs mock verified: scheme link →
 sheet → consent → enroll body with both ids → lead-in without / lead-out
-with `transaction_id`; same link again idempotent). Step 4 (device pass)
-and the platform-team items in §3.4 remain.
+with `transaction_id`; same link again idempotent). Step 4 device pass done
+2026-08-27 on the Galaxy A52s (Android 14) against dev — scheme link
+activation reported working by the user. Remaining: the platform-team
+items in §3.4 (assetlinks.json, landing page, backend admission of the new
+fields for `client: "android"`) and the §3.5 paperwork note.
 
 ## 1. What changes (behavior contract — byte-identical to iOS/extension)
 
