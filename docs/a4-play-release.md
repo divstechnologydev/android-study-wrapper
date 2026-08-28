@@ -35,15 +35,16 @@ Companion docs: [plan §a4](plan.md), [assetlinks-handoff.md](assetlinks-handoff
   Encrypted in transit: yes. Deletion request: yes → mechanism from R6.
   No ads, no selling, no financial/health/location/contacts data. "No data
   collected" would be a false declaration.
-- [ ] **R4 — store listing assets (client).** 512×512 PNG icon, 1024×500
-  feature graphic, ≥2 phone screenshots (16:9/9:16, 320–3840 px), 7"/10"
-  tablet screenshots (or accept the "not optimised" badge), app name
-  (≤30, "Moveo One User Research"), short description (≤80), full
-  description (≤4000, must say plainly: research-participant app that
-  tracks interactions on study websites after consent), category
-  (Tools), contact email, website. Content rating (IARC questionnaire —
-  utility, no UGC shown to others), target audience **18+ / not for
-  children**, ads: none, news app: no, government app: no.
+- [ ] **R4 — store listing (client sign-off).** Assets are generated in
+  [store/](store/README.md) (2026-08-28): `icon-512.png`,
+  `feature-graphic-1024x500.png`, three 1080×2400 phone screenshots
+  (from a debug build on the mock study — retake from release on a real
+  study before production; fine for closed testing). Copy drafts are in
+  the section below. Still to do in Console: app name "Moveo One User
+  Research", category Tools, contact email + website, content rating
+  (IARC — utility, no UGC shown to others), target audience **18+ / not
+  for children**, ads: none, news: no, government: no. Tablet screenshots
+  skipped (R13).
 - [ ] **R5 — App access for reviewers.** The app has no manual code entry;
   a reviewer sees an empty activation screen. In *App content → App
   access* choose "all or some functionality restricted" and supply a
@@ -73,9 +74,9 @@ Companion docs: [plan §a4](plan.md), [assetlinks-handoff.md](assetlinks-handoff
 - [ ] **R9 — Play App Signing.** Opt in on first upload (the local
   keystore is the *upload* key). Back up `../keys/studywrapper-release.jks`
   + password off-machine (it is also the unrecoverable AppGallery key).
-- [ ] **R10 — version for public release.** `versionCode` 1 is fine;
-  decide whether `versionName` ships as `0.1.0` or `1.0.0` (visible in the
-  listing and in the enroll body's `extensionVersion`).
+- [x] **R10 — version for public release.** Not a gate — ships as
+  `versionCode 1 / 0.1.0` (decision 2026-08-28); bump per the README's
+  release steps on later uploads.
 - [ ] **R11 — closed testing first.** Upload to a closed track, run the
   §a4.3 pilot cohort; read the pre-launch report (crashes on the
   WebView-gate path, accessibility contrast on muted text). Personal
@@ -93,11 +94,12 @@ Companion docs: [plan §a4](plan.md), [assetlinks-handoff.md](assetlinks-handoff
   build` green, API 36 smoke (consent → browser → home) clean, no
   `AndroidRuntime` fatals. Remaining lint: `GradleDependency` /
   `AndroidGradlePluginVersion` only.
-- [ ] **R13 — orientation lock.** `screenOrientation="portrait"` is
-  ignored on large screens at API 36 (lint suppressed in `app/lint.xml`,
-  product decision §a0.6). Open: verify the screens on a tablet AVD in
-  landscape once (consent card is `widthIn(max = 560.dp)`, so it should
-  just centre) or accept letterboxing on phones.
+- [x] **R13 — orientation lock.** Skipped (not a Play gate, 2026-08-28).
+  `screenOrientation="portrait"` is ignored on large screens at API 36
+  (lint suppressed in `app/lint.xml`, product decision §a0.6); the
+  consent card is `widthIn(max = 560.dp)` so it centres. Tablets are not
+  a target form factor for v1 — accept the "not optimised for tablets"
+  listing note.
 - [x] **R14 — lint noise.** (done 2026-08-28) `@SuppressLint("RequiresFeature")`
   on the three gated `StudyWebView` methods; `app/lint.xml` ignores
   `ObsoleteSdkInt` on `mipmap-anydpi-v26` (false positive — AAPT rejects
