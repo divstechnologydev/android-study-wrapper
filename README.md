@@ -103,7 +103,10 @@ App Links need two things:
    listing **both** signing certificates — the Play App Signing key and the
    AppGallery distribution key (plan §h4); add the debug cert for internal
    builds. The Android counterpart of the iOS AASA; they coexist in
-   `.well-known/`:
+   `.well-known/`. **Not live yet** — as of 2026-08-28 the prod host returns
+   `[]` and the dev host returns the SPA's HTML, so https links currently
+   open the browser, not the app. Ready-to-deploy file, real fingerprints
+   and verification steps: [docs/assetlinks-handoff.md](docs/assetlinks-handoff.md).
 
    ```json
    [{
