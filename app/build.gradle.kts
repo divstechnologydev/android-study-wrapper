@@ -19,13 +19,15 @@ fun signingSecret(property: String, env: String): String? =
 
 android {
     namespace = "one.moveo.studywrapper"
-    compileSdk = 35
+    // API 36: Google Play requires new apps/updates to target Android 16
+    // from 2026-08-31 (docs/a4-play-release.md R1).
+    compileSdk = 36
 
     defaultConfig {
         // Matches the iOS bundle id (docs/plan.md §0).
         applicationId = "one.moveo.studywrapper"
         minSdk = 26
-        targetSdk = 35
+        targetSdk = 36
         versionCode = 1
         versionName = "0.1.0"
     }

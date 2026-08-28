@@ -3,12 +3,18 @@ package one.moveo.studywrapper
 import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.lightColorScheme
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.toArgb
 import one.moveo.studywrapper.ui.Brand
 import one.moveo.studywrapper.ui.RootScreen
 
@@ -24,6 +30,15 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Edge-to-edge is enforced from target API 35/36; the theme is
+        // light-only, so both bars get dark icons over a transparent scrim
+        // and the content keeps clear of them via safeDrawing below
+        // (docs/a4-play-release.md R1).
+        val scrim = Brand.bg.toArgb()
+        enableEdgeToEdge(
+            statusBarStyle = SystemBarStyle.light(scrim, scrim),
+            navigationBarStyle = SystemBarStyle.light(scrim, scrim),
+        )
         // A recreated activity (process death, configuration change) gets
         // the original launch intent again — the model already consumed it,
         // so only a fresh instance handles it.
@@ -43,7 +58,12 @@ class MainActivity : ComponentActivity() {
                 ),
             ) {
                 Surface(modifier = Modifier.fillMaxSize(), color = Brand.bg) {
-                    RootScreen(model)
+                    // Status bar, gesture nav bar, display cutouts and the
+                    // IME are kept out of every screen's layout.
+                    RootScreen(
+                        model,
+                        modifier = Modifier.windowInsetsPadding(WindowInsets.safeDrawing),
+                    )
                 }
             }
         }
