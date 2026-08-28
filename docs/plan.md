@@ -375,6 +375,23 @@ switch via `/__end` deactivates on next foreground → leave clears data.
 
 ---
 
+### a2.9 Study instructions on the consent screen
+
+Port of iOS `e7eaec3 instructions rendering` / extension `f587ebe`
+(config-schema §2.1): optional `study.instructions` (≤ 2000 chars, plain
+text) rendered under "Instructions" on the consent screen, between the
+replace notice and the tracked websites. `studycore/Instructions.kt` ports
+`src/instructions.js` verbatim (line-ending/tab normalization, unsafe
+control/zero-width/bidi stripping, blank-line paragraphs, `- `/`* ` bullets,
+single newline = line break, cap truncation as defence in depth);
+`ConfigValidator` rejects > 2000 chars / non-strings / present-but-null
+exactly like the extension; `ConsentScreen` renders blocks with plain
+`Text(String)` (no AnnotatedString, no linkify — author prose can never be
+styling or a link). Not consent wording ⇒ `TEXT_VERSION` unchanged. Fixtures
+re-vendored (21, `invalid-instructions-too-long.json`). Tests:
+`InstructionsTests` (extension §10 case table + surrogate-pair case), 3
+validator tests. **Status:** done 2026-08-28.
+
 ### a2.8 Finishing a study (Done / Finish study / target completes)
 
 Port of the iOS `done-finish` branch / extension `done-finish` branch

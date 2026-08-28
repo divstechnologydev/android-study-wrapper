@@ -3,8 +3,8 @@
   "study": {
     "id": "st_8f3k2m",
     "name": "Sainsbury's meat purchase study",
-    "status": "active"
-
+    "status": "active",
+    "instructions": "Thanks for taking part! This study looks at how people shop for groceries online.\n\nYour task:\n- Go to sainsburys.co.uk and sign in (or continue as a guest)\n- Add a pack of chicken breasts to your basket\n- Proceed to checkout, but stop before entering payment details\n\nPlease browse as you normally would — there are no right or wrong answers."
   },
   "tracking": {
     "token": "MOVEO_PROJECT_TOKEN_EXAMPLE",
