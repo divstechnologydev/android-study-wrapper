@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Lint baseline decisions (docs/a4-play-release.md R14). -->
+<lint>
+    <!-- False positive: AAPT requires the -v26 qualifier for <adaptive-icon>
+         resources even when minSdk >= 26 (renaming the folder fails
+         resource linking). -->
+    <issue id="ObsoleteSdkInt">
+        <ignore path="src/main/res/mipmap-anydpi-v26" />
+    </issue>
+    <!-- Brand constellation background is one decorative full-screen vector,
+         drawn once per auth screen; not an icon. -->
+    <issue id="VectorRaster">
+        <ignore path="src/main/res/drawable/auth_constellation.xml" />
+    </issue>
+    <issue id="VectorPath">
+        <ignore path="src/main/res/drawable/auth_constellation.xml" />
+    </issue>
+    <!-- Portrait lock is a v1 product decision (docs/plan.md §a0.6); API 36
+         ignores it on large screens anyway (R13). -->
+    <issue id="LockedOrientationActivity" severity="ignore" />
+    <issue id="DiscouragedApi">
+        <ignore path="src/main/AndroidManifest.xml" />
+    </issue>
+</lint>

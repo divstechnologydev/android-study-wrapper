@@ -126,6 +126,7 @@ class StudyWebViewController(
     /// user script. The redirect comes from the debug source set and does
     /// not exist in release builds. Document-start, all matching frames,
     /// origin-scoped by the platform (§a0.3 layer 1).
+    @SuppressLint("RequiresFeature") // gated once by isWebViewSupported() before any WebView exists
     private fun installUserScripts(webView: WebView, source: String?) {
         val rules = allowedOriginRules() ?: return
         DebugHooks.ingestRedirectScript(model)?.let { redirect ->
@@ -154,6 +155,7 @@ class StudyWebViewController(
     /// JS↔native bridge (§a2.4): same origin rules as injection, so the
     /// bridge object doesn't even exist off-study. Stricter than the iOS
     /// WKScriptMessageHandler, which is page-global.
+    @SuppressLint("RequiresFeature") // see installUserScripts
     private fun installBridge(webView: WebView) {
         val rules = allowedOriginRules() ?: return
         WebViewCompat.addWebMessageListener(webView, "moveoNative", rules) { _, message, _, _, _ ->
@@ -199,6 +201,7 @@ class StudyWebViewController(
     /// mirroring iOS applyUserScript and the extension's re-registration.
     /// The whole set is rebuilt so a refresh never silently drops the DEBUG
     /// redirect script.
+    @SuppressLint("RequiresFeature") // see installUserScripts
     override fun applyUserScript(source: String?) {
         val webView = webView ?: return
         scriptHandlers.forEach { it.remove() }

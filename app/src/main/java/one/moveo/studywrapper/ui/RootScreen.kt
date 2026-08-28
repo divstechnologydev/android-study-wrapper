@@ -18,7 +18,7 @@ import one.moveo.studywrapper.browser.LeadSurveyLauncher
 /// replacement (new code while a study is active) must be able to run its
 /// consent flow, which ActivationScreen owns.
 @Composable
-fun RootScreen(model: AppViewModel) {
+fun RootScreen(model: AppViewModel, modifier: Modifier = Modifier) {
     val phase by model.phase.collectAsState()
     val activeStudy by model.activeStudy.collectAsState()
     val endedStudy by model.endedStudy.collectAsState()
@@ -26,7 +26,7 @@ fun RootScreen(model: AppViewModel) {
     val leadSheet by model.leadSheet.collectAsState()
     val context = LocalContext.current
 
-    Box(modifier = Modifier.fillMaxSize()) {
+    Box(modifier = modifier.fillMaxSize()) {
         val study = activeStudy
         val ended = endedStudy
         when {

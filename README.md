@@ -236,8 +236,9 @@ account setup, privacy declaration answers, reviewer notes, Cloud Debugging
 test on a real GMS-less device: [docs/h3-appgallery.md](docs/h3-appgallery.md).
 
 **5. After both are live**, tag the commit (`v<versionName>`). First-release
-extras — store listing assets, privacy policy URL, App Links fingerprints —
-are tracked in [plan §a4 and §h](docs/plan.md).
+extras — store listing assets, privacy policy URL, Data safety answers, App
+Links fingerprints — are tracked item by item in
+[docs/a4-play-release.md](docs/a4-play-release.md) (and [plan §a4 and §h](docs/plan.md)).
 
 ## Sibling repos (read-only dependencies)
 
