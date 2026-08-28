@@ -4,6 +4,7 @@ import java.time.Instant
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
@@ -72,17 +73,17 @@ class AppViewModel(
         data object Fetching : Phase()
         data class Failed(val title: String, val message: String) : Phase()
         data class StudyEnded(val name: String) : Phase()
-        /// Confirmation accepted — showing the consent screen (a0.5 wording).
+        /// Config fetched and valid — showing the consent screen (a0.5
+        /// wording). Same as the extension's link flow: link → consent, no
+        /// intermediate summary sheet; the consent page itself names the
+        /// study, lists the tracked websites and warns about replacing a
+        /// study (removed 2026-08-28, with iOS).
         data class Consent(val pending: PendingActivation) : Phase()
     }
 
     val codeInput = MutableStateFlow("")
     private val _phase = MutableStateFlow<Phase>(Phase.Idle)
     val phase: StateFlow<Phase> = _phase
-
-    /// Non-null shows the study-summary confirmation sheet.
-    private val _pendingConfirmation = MutableStateFlow<PendingActivation?>(null)
-    val pendingConfirmation: StateFlow<PendingActivation?> = _pendingConfirmation
 
     /// Mirror of `store.activeStudy` — non-null switches the root to the
     /// study home screen.
@@ -117,6 +118,15 @@ class AppViewModel(
     /// Live WebView handle while the browser is on screen (← iOS `weak var
     /// browser`); set by the controller on attach, cleared on detach.
     var browser: BrowserProxy? = null
+
+    /// Participant-side completion (target reached / Finish study) that is
+    /// already persisted — ended record written, active study cleared — but
+    /// whose on-screen transition waits for the closing page (lead-out
+    /// Custom Tab) to close, so it is not pulled away from under the
+    /// participant. Applied on the next activity resume (§a2.8).
+    private var pendingCompletion: EndedStudy? = null
+    val hasPendingCompletion: Boolean
+        get() = pendingCompletion != null
 
     /// Last hostname the injected tag reported "initialized" from (bridge
     /// health ping) — debug-build surface only (release never renders it).
@@ -167,15 +177,13 @@ class AppViewModel(
         // builds only (null sink in release).
         debugLog?.invoke(
             "openURL code ${link.code} transactionId ${link.transactionId ?: "-"} " +
-                "active ${store.activeStudy?.code ?: "-"} pending ${_pendingConfirmation.value?.code ?: "-"} " +
-                "phase ${_phase.value::class.simpleName}",
+                "active ${store.activeStudy?.code ?: "-"} phase ${_phase.value::class.simpleName}",
         )
 
         // Same code already active: idempotent, no re-fetch, no second
         // enrollment (the extension's `alreadyActive`). Straight to home.
         val active = store.activeStudy
         if (active != null && active.code == link.code) {
-            _pendingConfirmation.value = null
             linkTransactionId = null
             codeInput.value = ""
             _phase.value = Phase.Idle
@@ -183,17 +191,9 @@ class AppViewModel(
             return
         }
 
-        // Same code already mid-activation (summary sheet or consent screen):
-        // update in place instead of restarting — a transaction id on the
-        // fresh link wins over a stale or absent one.
-        _pendingConfirmation.value?.let { pending ->
-            if (pending.code == link.code) {
-                _pendingConfirmation.value =
-                    pending.copy(transactionId = link.transactionId ?: pending.transactionId)
-                _browserPresented.value = false
-                return
-            }
-        }
+        // Same code already on the consent screen: update in place instead
+        // of restarting — a transaction id on the fresh link wins over a
+        // stale or absent one.
         (_phase.value as? Phase.Consent)?.pending?.let { pending ->
             if (pending.code == link.code) {
                 _phase.value = Phase.Consent(
@@ -205,8 +205,8 @@ class AppViewModel(
 
         linkTransactionId = link.transactionId?.let { LinkTransactionId(code = link.code, id = it) }
         codeInput.value = link.code
-        // The confirmation sheet is owned by ActivationScreen — it cannot
-        // show under the study browser's full-screen cover.
+        // The consent screen is owned by ActivationScreen — it cannot show
+        // under the study browser's full-screen cover.
         _browserPresented.value = false
         activate()
     }
@@ -240,7 +240,6 @@ class AppViewModel(
         }
         val code = input.code
         _phase.value = Phase.Fetching
-        _pendingConfirmation.value = null
         when (val result = configService.fetchConfig(code = code)) {
             is ApiResult.Success -> {
                 val config = result.value
@@ -256,47 +255,25 @@ class AppViewModel(
                         transactionId = input.transactionId,
                     )
                     linkTransactionId = null // consumed by this activation
-                    _phase.value = Phase.Idle
+                    // Straight to consent. Nothing is stored yet and the
+                    // backend hasn't been told anything; enrollment happens
+                    // only on accept, and Decline is the way out.
+                    _consentError.value = null
+                    _phase.value = Phase.Consent(pending)
                     // Scripted QA (milestone smoke scripts, no UI interaction):
-                    //   MOVEO_AUTO_FLOW=consent — jump to the consent screen
-                    //   MOVEO_AUTO_FLOW=enroll  — accept consent + enroll too
+                    //   MOVEO_AUTO_FLOW=enroll  — accept consent + enroll
+                    //   MOVEO_AUTO_FLOW=browser — …and open the study browser
                     when (qaAutoFlow) {
-                        "consent" -> {
-                            _phase.value = Phase.Consent(pending)
-                            return
-                        }
-                        "enroll" -> {
-                            _phase.value = Phase.Consent(pending)
-                            acceptConsentNow()
-                            return
-                        }
+                        "enroll" -> acceptConsentNow()
                         "browser" -> {
-                            _phase.value = Phase.Consent(pending)
                             acceptConsentNow()
                             if (_activeStudy.value != null) openBrowser()
-                            return
                         }
                     }
-                    _pendingConfirmation.value = pending
                 }
             }
             is ApiResult.Failure -> _phase.value = failedPhase(result.error)
         }
-    }
-
-    /// Study summary confirmed — show consent. Nothing is stored yet and the
-    /// backend hasn't been told anything; enrollment happens only on accept.
-    fun confirmActivation() {
-        val pending = _pendingConfirmation.value ?: return
-        _pendingConfirmation.value = null
-        _consentError.value = null
-        _phase.value = Phase.Consent(pending)
-    }
-
-    fun cancelActivation() {
-        _pendingConfirmation.value = null
-        linkTransactionId = null
-        _phase.value = Phase.Idle
     }
 
     /// Consent accepted → POST /enroll (the billing truth; 409 = success).
@@ -380,8 +357,10 @@ class AppViewModel(
         store.activeStudy = null
         store.consent = null
         store.endedStudy = null
+        store.ownTagHosts = emptyMap() // extension deactivate() clears these too
         _activeStudy.value = null
         _endedStudy.value = null
+        pendingCompletion = null
         linkTransactionId = null
         codeInput.value = ""
         _phase.value = Phase.Idle
@@ -399,8 +378,19 @@ class AppViewModel(
         presentDueLeadOut() // crash recovery for a pending lead-out (M4)
 
         val study = store.activeStudy ?: return
+        // A record whose lead-out was already shown but is still active can
+        // only come from a build where the lead-out did not end the study —
+        // the participant finished; complete it now.
+        if (study.leadOutShownAt != null) {
+            completeStudy(study, leadOutShownAt = study.leadOutShownAt)
+            applyPendingCompletionNow()
+            return
+        }
         when (val result = configService.fetchConfig(code = study.code)) {
             is ApiResult.Success -> {
+                // The participant may have finished or left during the fetch
+                // — never resurrect a study that storage no longer holds.
+                if (store.activeStudy?.code != study.code) return
                 val fresh = result.value
                 if (fresh.study.status == StudyConfig.Status.ENDED) {
                     endStudy(study, revoked = false)
@@ -413,7 +403,10 @@ class AppViewModel(
             }
             is ApiResult.Failure -> when (result.error) {
                 // Code revoked/unknown → deactivate with a distinct message.
-                is ActivationError.NotFound -> endStudy(study, revoked = true)
+                is ActivationError.NotFound -> {
+                    if (store.activeStudy?.code != study.code) return
+                    endStudy(study, revoked = true)
+                }
                 // Network/server/rate-limit: keep the stale-but-active study —
                 // tracking continues until a SUCCESSFUL fetch says otherwise
                 // (same posture as the extension).
@@ -442,6 +435,7 @@ class AppViewModel(
         store.activeStudy = null
         _activeStudy.value = null
         _endedStudy.value = ended
+        pendingCompletion = null
         _browserPresented.value = false
         _leadSheet.value = null
     }
@@ -550,33 +544,136 @@ class AppViewModel(
             "initialized" -> {
                 if (isDebugBuild) _tagInitializedHost.value = body["hostname"]
             }
+            "flushed" -> {
+                // Completion flush answered (the controller resolves the wait;
+                // this is the QA oracle — counts only, never payloads).
+                debugLog?.invoke(
+                    "completion flush → sent ${body["sent"] ?: "?"} timedOut ${body["timedOut"] ?: "?"}",
+                )
+            }
         }
     }
 
     // MARK: - Target & lead-out (extension: target-service)
 
+    private val leadOutDelayMillis = (FlowConstants.LEAD_OUT_DELAY_SECONDS * 1000).toLong()
+    private val completionFlushTimeoutMillis = (FlowConstants.COMPLETION_FLUSH_TIMEOUT_SECONDS * 1000).toLong()
+
     /// Marks the target once per participant per study, schedules the
     /// lead-out. `leadOutDueAt` is persisted BEFORE the timer so an app kill
     /// inside the delay self-heals on next launch; `leadOutShownAt` is only
     /// written after the Custom Tab actually launches — lost lead-outs
-    /// self-heal, shown ones never repeat.
+    /// self-heal, shown ones never repeat. Reaching the target completes the
+    /// study (extension `handleTargetReached`): via the lead-out when there
+    /// is one, otherwise right here.
     private fun targetReached(study: ActiveStudy) {
         val firedAt = now()
         var updated = study.copy(targetFired = true, targetFiredAt = firedAt)
-        if (updated.config.flow.leadOutUrl != null && updated.leadOutShownAt == null) {
-            updated = updated.copy(
-                leadOutDueAt = firedAt.plusMillis((FlowConstants.LEAD_OUT_DELAY_SECONDS * 1000).toLong()),
-            )
+        val hasLeadOut = updated.config.flow.leadOutUrl != null && updated.leadOutShownAt == null
+        if (hasLeadOut) {
+            updated = updated.copy(leadOutDueAt = firedAt.plusMillis(leadOutDelayMillis))
         }
         store.activeStudy = updated
         _activeStudy.value = updated
         refreshUserScript() // drops the event_match spec from future loads
-        if (updated.leadOutDueAt != null) {
+        if (hasLeadOut) {
             scope.launch {
-                kotlinx.coroutines.delay((FlowConstants.LEAD_OUT_DELAY_SECONDS * 1000).toLong())
+                delay(leadOutDelayMillis)
                 presentDueLeadOut()
             }
+        } else {
+            // Nothing to show — the target itself completes the study.
+            // Persist now (crash-safe); let the participant see their own
+            // confirmation page for the lead-out delay before the browser
+            // gives way to the completion screen.
+            completeStudy(updated, leadOutShownAt = updated.leadOutShownAt)
+            scope.launch {
+                delay(leadOutDelayMillis)
+                applyPendingCompletionNow()
+            }
         }
+    }
+
+    // MARK: - Completion (extension: config-service.finishStudy / completeStudy)
+
+    /// "Finish study" — browser Done or the home-screen button, after the
+    /// participant confirmed. Opens the lead-out now (with the panel
+    /// transaction id, so the provider credits the completion) and completes
+    /// the study; a lead-out already shown by the target flow is not shown
+    /// again. Without a lead-out the study completes immediately.
+    fun finishStudy() {
+        val study = store.activeStudy ?: return
+        if (study.config.flow.leadOutUrl != null && study.leadOutShownAt == null) {
+            // Due-time persisted first: a kill before the Custom Tab launches
+            // is recovered on the next foreground (presentDueLeadOut),
+            // exactly like the target path.
+            val updated = study.copy(leadOutDueAt = now())
+            store.activeStudy = updated
+            _activeStudy.value = updated
+            presentDueLeadOut()
+        } else {
+            completeStudy(study, leadOutShownAt = study.leadOutShownAt)
+            scope.launch { applyPendingCompletionNow() }
+        }
+    }
+
+    /// Participant-side completion: write the ended record (the thank-you
+    /// screen) and deactivate the study in storage NOW — same durability as
+    /// the extension's completeStudy — while the visible transition is
+    /// deferred to `applyPendingCompletionNow`. Tracking stops from the next
+    /// page load (null user script). Idempotent.
+    private fun completeStudy(study: ActiveStudy, leadOutShownAt: Instant?) {
+        if (pendingCompletion != null) return
+        val ended = EndedStudy(
+            code = study.code,
+            name = study.config.study.name,
+            endedAt = now(),
+            leadOutUrl = study.config.flow.leadOutUrl,
+            leadOutShownAt = leadOutShownAt,
+            revoked = false,
+            completed = true,
+        )
+        store.endedStudy = ended
+        store.activeStudy = null
+        store.consent = null
+        store.ownTagHosts = emptyMap()
+        pendingCompletion = ended
+        refreshUserScript()
+    }
+
+    /// Moves the UI to the completion screen: drains the tag's event buffer
+    /// while the WebView is still alive, then closes the browser and clears
+    /// the study website data (the participant's logins on the study sites
+    /// do not outlive the study — same rule as leaving). No-op unless a
+    /// completion is pending. UI state is mirrored FROM storage rather than
+    /// forced to null: a setup link that arrived while the closing page was
+    /// up (onNewIntent precedes onResume) may already be mid-activation.
+    suspend fun applyPendingCompletionNow() {
+        pendingCompletion ?: return
+        pendingCompletion = null
+        // Closing the browser tears down the web process; anything the tag
+        // still holds (up to one 5 s flush interval, plus in-flight posts)
+        // would be lost. Bounded wait — see COMPLETION_FLUSH_TIMEOUT_SECONDS.
+        browser?.flushEvents(completionFlushTimeoutMillis)
+        browser?.applyUserScript(null)
+        browser?.clearBrowsingData()
+        _browserPresented.value = false
+        _leadSheet.value = null
+        _activeStudy.value = store.activeStudy
+        _endedStudy.value = store.endedStudy
+        clearWebsiteData()
+    }
+
+    /// MainActivity.onResume — the Android "lead sheet dismissed" signal
+    /// (the Custom Tab / system browser returned). A completion that waited
+    /// for the closing page to close is applied now; otherwise a lead-out
+    /// queued behind a lead-in gets its turn (crash recovery too).
+    fun activityResumed() {
+        if (pendingCompletion != null) {
+            scope.launch { applyPendingCompletionNow() }
+            return
+        }
+        presentDueLeadOut()
     }
 
     /// Opens a due lead-out (fast path: the timer above; recovery path:
@@ -611,12 +708,23 @@ class AppViewModel(
         // only; carries at most the pseudonymous participant id).
         debugLog?.invoke("lead: ${sheet.kind} ${sheet.url}")
         val study = store.activeStudy ?: return
-        val updated = when (sheet.kind) {
-            LeadSheet.Kind.LEAD_IN -> study.copy(leadInShownAt = now())
-            LeadSheet.Kind.LEAD_OUT -> study.copy(leadOutShownAt = now(), leadOutDueAt = null)
+        when (sheet.kind) {
+            LeadSheet.Kind.LEAD_IN -> {
+                val updated = study.copy(leadInShownAt = now())
+                store.activeStudy = updated
+                _activeStudy.value = updated
+            }
+            LeadSheet.Kind.LEAD_OUT -> {
+                val shownAt = now()
+                val updated = study.copy(leadOutShownAt = shownAt, leadOutDueAt = null)
+                store.activeStudy = updated
+                _activeStudy.value = updated
+                // Lead-out shown → the participant is done (extension
+                // openDueLeadOut → completeStudy). Persisted now; the screen
+                // changes when they close the closing page (activityResumed).
+                completeStudy(updated, leadOutShownAt = shownAt)
+            }
         }
-        store.activeStudy = updated
-        _activeStudy.value = updated
     }
 
     // MARK: - Leave with data clearing (a2.6)
@@ -632,13 +740,19 @@ class AppViewModel(
         browser?.applyUserScript(null)
         browser?.clearBrowsingData()
         leaveStudy()
+        clearWebsiteData()
+    }
+
+    /// Cookies + storage, wholesale (leave and completion; the lead surveys
+    /// live in the Custom Tab's separate store and are untouched).
+    private fun clearWebsiteData() {
         try {
             android.webkit.CookieManager.getInstance().removeAllCookies(null)
             android.webkit.CookieManager.getInstance().flush()
             android.webkit.WebStorage.getInstance().deleteAllData()
         } catch (_: Exception) {
-            // WebView provider unavailable (browser never opened) — nothing
-            // to clear.
+            // WebView provider unavailable (browser never opened, JVM tests)
+            // — nothing to clear.
         }
     }
 

@@ -26,6 +26,11 @@ object BackendConstants {
 object FlowConstants {
     /// Delay between the target action firing and the lead-out opening.
     const val LEAD_OUT_DELAY_SECONDS = 2.0
+
+    /// How long completion waits for the tag to drain its event buffer
+    /// before the study browser is torn down. Bounded so a dead network can
+    /// never trap the participant on a finished study.
+    const val COMPLETION_FLUSH_TIMEOUT_SECONDS = 3.0
 }
 
 /// Consent wording version (a0.5). Bump on ANY change to the wording shown in

@@ -57,9 +57,10 @@ data class ConsentRecord(
     val textVersion: String,
 )
 
-/// Terminal record kept after a study ends (kill switch / 404 revocation) so
-/// the UI can show a friendly end state; the lead-out fields preserve what
-/// the active study already showed (parity with the extension's endedStudy).
+/// Terminal record kept after a study ends (participant completion, kill
+/// switch, 404 revocation) so the UI can show a friendly end state; the
+/// lead-out fields preserve what the active study already showed (parity
+/// with the extension's endedStudy).
 @Serializable
 data class EndedStudy(
     val code: String,
@@ -70,4 +71,8 @@ data class EndedStudy(
     /// true when the study disappeared (404 on re-validation) rather than
     /// ending normally — the UI shows a distinct message for that.
     val revoked: Boolean? = null,
+    /// true when the participant completed the study themselves (target
+    /// reached → lead-out shown, or "Finish study") rather than the study
+    /// being ended server-side — the UI says "complete", not "has ended".
+    val completed: Boolean? = null,
 )

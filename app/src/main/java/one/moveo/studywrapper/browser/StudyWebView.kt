@@ -14,6 +14,8 @@ import android.webkit.WebViewClient
 import androidx.webkit.ScriptHandler
 import androidx.webkit.WebViewCompat
 import androidx.webkit.WebViewFeature
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonObject
@@ -41,6 +43,12 @@ interface BrowserProxy {
     /// Wholesale in-WebView cleanup on leave (cache + history; cookies and
     /// storage are cleared globally by the model).
     fun clearBrowsingData()
+
+    /// Ask the injected tag to send its buffered events now and wait until
+    /// they have landed (bounded by `timeoutMillis`). Returns when done or
+    /// when the deadline passes — never throws, never blocks longer than the
+    /// deadline. Main thread (WebView contract).
+    suspend fun flushEvents(timeoutMillis: Long)
 }
 
 /// Both features have shipped in Android System WebView for years; the gate
@@ -58,6 +66,10 @@ class StudyWebViewController(
 ) : BrowserProxy {
     private var webView: WebView? = null
     private val scriptHandlers = mutableListOf<ScriptHandler>()
+
+    /// Completion flush in progress (§a2.8): resolved by the page's
+    /// `{ type: "flushed" }` bridge post, or by the deadline.
+    private var flushResult: CompletableDeferred<Unit>? = null
 
     /// Mirrored from the study config so the (synchronous) navigation policy
     /// never re-reads storage. Refreshed on attach + script apply.
@@ -103,6 +115,7 @@ class StudyWebViewController(
 
     fun destroy() {
         if (model.browser === this) model.browser = null
+        flushResult?.complete(Unit) // nothing left to wait for
         webView?.destroy()
         webView = null
         scriptHandlers.clear()
@@ -153,6 +166,9 @@ class StudyWebViewController(
                 return@addWebMessageListener
             }
             val type = body["type"] ?: return@addWebMessageListener
+            // Completion flush answered (the model still gets the message
+            // for its debug log line).
+            if (type == "flushed") flushResult?.complete(Unit)
             model.handleBridgeMessage(type = type, body = body)
         }
         // M5 parity capture: separate "moveoDebug" listener, same origin
@@ -193,6 +209,41 @@ class StudyWebViewController(
     override fun clearBrowsingData() {
         webView?.clearCache(true)
         webView?.clearHistory()
+    }
+
+    /// Completion flush (main frame; the bootstrap's `__moveoFlush`).
+    /// `evaluateJavascript` cannot await a Promise, so the snippet answers
+    /// synchronously — "skipped" when there is no tag on this page (off-
+    /// origin page, yielded host) — or "pending" after kicking the flush,
+    /// whose result comes back as a `flushed` bridge post. A native deadline
+    /// slightly past the JS one bounds the wait, so a hung web process
+    /// cannot stall completion (← iOS Coordinator.flushEvents).
+    override suspend fun flushEvents(timeoutMillis: Long) {
+        val webView = webView ?: return
+        val deferred = CompletableDeferred<Unit>()
+        flushResult = deferred
+        val script = """
+            (function () {
+              if (typeof window.__moveoFlush !== "function") return "skipped";
+              window.__moveoFlush($timeoutMillis).then(function (r) {
+                try {
+                  window.moveoNative.postMessage(JSON.stringify({
+                    type: "flushed",
+                    sent: String(r && r.sent),
+                    timedOut: String(r && r.timedOut)
+                  }));
+                } catch (e) {}
+              });
+              return "pending";
+            })()
+        """.trimIndent()
+        webView.evaluateJavascript(script) { value ->
+            // JSON-encoded result; anything but "pending" (no tag here, or a
+            // script error → null) means there is nothing to wait for.
+            if (value != "\"pending\"") deferred.complete(Unit)
+        }
+        withTimeoutOrNull(timeoutMillis + 500) { deferred.await() }
+        if (flushResult === deferred) flushResult = null
     }
 
     // MARK: - Navigation policy (§a2.5 — the scope-keeper, a0.3 layer 3)

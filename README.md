@@ -6,9 +6,9 @@ tag into the study's websites. The Android sibling of the iOS study wrapper.
 
 **Status: in progress.** Phases a0–a3.2 (skeleton, `:studycore` port,
 activation/consent/browser, parity capture, feature matrix), h1–h2 (store
-flavors, signing) and a1.4 (link-first activation with transaction id +
-client enrollment id) are done; open items are platform-side (assetlinks,
-landing page) and release paperwork. Implementation follows
+flavors, signing), a1.4 (link-first activation with transaction id +
+client enrollment id) and a2.8 (finishing a study) are done; open items
+are platform-side (assetlinks, landing page) and release paperwork. Implementation follows
 [docs/plan.md](docs/plan.md) phase by phase. Build: `./gradlew build`; unit
 tests: `./gradlew :studycore:test`. [docs/](docs/) is the plan and context
 package:
@@ -61,7 +61,7 @@ adb reverse tcp:8787 tcp:8787           # emulator → host
 
 Other debug-only intent extras (scripted QA): `MOVEO_AUTO_CODE` (activate a
 code — or a full setup link — on launch), `MOVEO_AUTO_FLOW
-consent|enroll|browser` (auto-step to that screen), `MOVEO_AUTO_NAV <url>`
+enroll|browser` (auto-accept consent, optionally open the browser), `MOVEO_AUTO_NAV <url>`
 (navigate the live study browser; also accepts `javascript:` URLs),
 `MOVEO_INGEST_OVERRIDE <url>` (explicit event reroute). Watch backend calls,
 link arrivals, bridge messages, lead launches, and spied events:
@@ -77,7 +77,10 @@ intentionally not in the UI (a typed code cannot carry the panel provider's
 transaction id; the model still accepts one via `codeInput` for the DEBUG
 `MOVEO_AUTO_CODE` hook, so re-adding the field later is UI-only). Both link
 shapes land in `MainActivity.handleIntent` → `AppViewModel.handleOpenUrl`
-and go through fetch → confirm → consent ([docs/a1-transactions.md](docs/a1-transactions.md)):
+and go straight to fetch → consent (no summary sheet in between — the
+consent page names the study, lists the tracked sites and carries the
+replace warning, same as the extension's link → consent tab;
+[docs/a1-transactions.md](docs/a1-transactions.md)):
 
 | Form | Example | Opens the app when |
 |---|---|---|
@@ -132,6 +135,31 @@ Oracles: `adb logcat -s moveo-backend` prints `openURL code … transactionId �
 on arrival and `lead: LEAD_OUT <url>` with the echoed id; the mock backend
 logs `enrollmentId …, transactionId …` on enroll; the gear screen shows the
 active study's ids.
+
+## Finishing a study
+
+Parity with the extension's and iOS's `done-finish` branches
+([docs/a2-finish.md](docs/a2-finish.md)): reaching the target **completes**
+the study, and the participant can finish it themselves.
+
+- **Target reached** → lead-out opens after the usual 2 s delay (Custom
+  Tab) → the study is completed (ended record written, active study
+  cleared) the moment the lead-out launches; the "Study complete" screen
+  shows when the participant comes back to the app (`onResume`). No
+  lead-out configured ⇒ completes right at the target (browser gives way
+  after the same 2 s).
+- **Done** (browser) / **Finish study** (home) → confirmation ("Tracking
+  stops and you'll be taken to the closing page.") → lead-out opens with the
+  transaction id → complete. A lead-out already shown is not shown again.
+  System back at the end of the page history still just returns to the
+  home screen (tracking continues) — Android's way out without finishing.
+- **Events are flushed first**: before the browser is torn down, the app
+  runs `window.__moveoFlush()` (bootstrap-installed; drains the tag's
+  buffer and resolves when the POSTs land, bounded by
+  `FlowConstants.COMPLETION_FLUSH_TIMEOUT_SECONDS`) and waits for the
+  page's `flushed` bridge reply. Debug: `completion flush → sent N timedOut
+  B` on `moveo-backend`.
+- Completion also clears the study website data, like leaving.
 
 ### Release build (prod)
 

@@ -88,11 +88,11 @@ fields for `client: "android"`) and the §3.5 paperwork note.
   from Mail/Chrome here while the app is alive, including with the study
   browser on screen — the model closes it, §1 rule 8).
 - Skip intents carrying `FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY` (relaunch from
-  Recents re-delivers the original link intent; without this a cancelled
-  activation would pop the summary sheet again). Applies to the debug
+  Recents re-delivers the original link intent; without this a declined
+  activation would pop the consent screen again). Applies to the debug
   `MOVEO_*` extras too, which is the correct behavior for those as well.
 - Everything else in the activity is unchanged; `RootScreen` needs no
-  change — a link-triggered `Phase`/`pendingConfirmation` already routes to
+  change — a link-triggered `Phase` already routes to
   `ActivationScreen` over Home (the "deep-link replacement" case its
   comment describes).
 
@@ -141,7 +141,9 @@ tests).
 suite for the link state machine (Q3). **Test:** `./gradlew build` green;
 emulator: `adb shell am start -a android.intent.action.VIEW -d
 "moveoone://config/TESTCODE1234?transaction_id=tx_qa_001"` against the mock
-→ summary sheet → consent → mock log shows `enrollmentId e_…, transactionId
+→ consent (the summary sheet in between was removed 2026-08-28, with iOS —
+the consent page carries the study name, origins and replace warning) →
+mock log shows `enrollmentId e_…, transactionId
 tx_qa_001`; prefs oracle (`run-as … cat shared_prefs/studywrapper.xml`) shows
 both on `activeStudy`; target page → `lead: LEAD_OUT …&transaction_id=tx_qa_001`
 in logcat; re-tapping the same link → straight to home, no second POST.

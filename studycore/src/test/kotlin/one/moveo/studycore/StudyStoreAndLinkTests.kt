@@ -104,10 +104,25 @@ class StudyStoreTests {
 
         val ended = EndedStudy(
             code = "C1", name = "Study", endedAt = Instant.ofEpochSecond(1_700_000_500),
-            leadOutUrl = "https://x.example/exit",
+            leadOutUrl = "https://x.example/exit", leadOutShownAt = Instant.ofEpochSecond(1_700_000_400),
+            completed = true,
         )
         store.endedStudy = ended
         assertEquals(ended, makeStore().endedStudy)
+        assertEquals(true, makeStore().endedStudy?.completed)
+    }
+
+    /// Records written before the finish flow (a2.8) have no `completed`
+    /// key — they must still decode, as a server-side end.
+    @Test
+    fun legacyEndedStudyWithoutCompletedDecodes() {
+        kv.putString(
+            "endedStudy",
+            """{"code":"C1","name":"Study","endedAt":"2026-08-01T00:00:00Z","revoked":false}""",
+        )
+        val ended = checkNotNull(makeStore().endedStudy)
+        assertNull(ended.completed)
+        assertEquals(false, ended.revoked)
     }
 
     @Test
