@@ -29,7 +29,7 @@ object DebugHooks {
     /// Scripted QA via intent extras (replaces the iOS MOVEO_* env vars):
     ///   adb shell am start -n one.moveo.studywrapper/.MainActivity \
     ///     -e MOVEO_API_BASE http://10.0.2.2:8787/api/v1/extension-config \
-    ///     -e MOVEO_AUTO_CODE TESTCODE1234 -e MOVEO_AUTO_FLOW consent \
+    ///     -e MOVEO_AUTO_CODE TESTCODE1234 -e MOVEO_AUTO_FLOW enroll \
     ///     -e MOVEO_AUTO_NAV https://example.com/checkout/x/thanks
     fun applyLaunchExtras(intent: Intent?, model: AppViewModel) {
         intent ?: return

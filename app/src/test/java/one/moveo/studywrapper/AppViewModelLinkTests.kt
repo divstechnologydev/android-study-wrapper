@@ -132,11 +132,15 @@ class AppViewModelLinkTests {
 
     private suspend fun <T> StateFlow<T>.await(predicate: (T) -> Boolean): T = first(predicate)
 
+    /// A link goes straight to the consent screen (no summary sheet since
+    /// 2026-08-28); the pending activation lives in the Consent phase.
     private suspend fun AppViewModel.awaitPending(): AppViewModel.PendingActivation =
-        pendingConfirmation.await { it != null }!!
+        (phase.await { it is AppViewModel.Phase.Consent } as AppViewModel.Phase.Consent).pending
+
+    private fun AppViewModel.pending(): AppViewModel.PendingActivation? =
+        (phase.value as? AppViewModel.Phase.Consent)?.pending
 
     private suspend fun AppViewModel.enrollNow() {
-        confirmActivation()
         acceptConsentNow()
     }
 
@@ -178,7 +182,7 @@ class AppViewModelLinkTests {
         val model = makeModel()
         model.codeInput.value = "  https://app.moveo.one/extension/config/test-code-1234?transaction_id=tx_paste \n"
         model.activateNow()
-        val pending = checkNotNull(model.pendingConfirmation.value)
+        val pending = checkNotNull(model.pending())
         assertEquals(CODE, pending.code)
         assertEquals("tx_paste", pending.transactionId)
     }
@@ -200,7 +204,6 @@ class AppViewModelLinkTests {
         assertEquals("no second enrollment", 1, enrollBodies.size)
         assertEquals(before, model.activeStudy.value)
         assertFalse("browser closed, home shows", model.browserPresented.value)
-        assertNull(model.pendingConfirmation.value)
         assertEquals(AppViewModel.Phase.Idle, model.phase.value)
         assertEquals("", model.codeInput.value)
     }
@@ -212,20 +215,19 @@ class AppViewModelLinkTests {
         val first = model.awaitPending()
         assertNull(first.transactionId)
 
-        // Summary sheet up: same code with a transaction id → updated in
+        // Consent screen up: same code with a transaction id → updated in
         // place, no restart, same enrollment id.
         model.handleOpenUrl(LINK_TX)
-        val updated = checkNotNull(model.pendingConfirmation.value)
+        val updated = checkNotNull(model.pending())
         assertEquals("tx_qa_001", updated.transactionId)
         assertEquals(first.enrollmentId, updated.enrollmentId)
         assertEquals("one fetch only", 1, configRequests)
 
         // A later plain link must not erase it (stale/absent never wins).
         model.handleOpenUrl(LINK_PLAIN)
-        assertEquals("tx_qa_001", model.pendingConfirmation.value?.transactionId)
+        assertEquals("tx_qa_001", model.pending()?.transactionId)
 
-        // Consent screen up: same rule.
-        model.confirmActivation()
+        // A fresher id still wins.
         model.handleOpenUrl("moveoone://config/$CODE?transaction_id=tx_newer")
         val consent = model.phase.value as AppViewModel.Phase.Consent
         assertEquals("tx_newer", consent.pending.transactionId)
@@ -248,16 +250,16 @@ class AppViewModelLinkTests {
         // A different code typed afterwards never inherits the link's id.
         model.codeInput.value = OTHER
         model.activateNow()
-        val other = checkNotNull(model.pendingConfirmation.value)
+        val other = checkNotNull(model.pending())
         assertEquals(OTHER, other.code)
         assertNull(other.transactionId)
-        model.cancelActivation()
+        model.declineConsent()
 
-        // The stash is gone after cancel — retyping the link's code is a
-        // plain typed activation now.
+        // The stash is gone after the decline — retyping the link's code is
+        // a plain typed activation now.
         model.codeInput.value = CODE
         model.activateNow()
-        assertNull(model.pendingConfirmation.value?.transactionId)
+        assertNull(model.pending()?.transactionId)
     }
 
     @Test
@@ -271,7 +273,7 @@ class AppViewModelLinkTests {
         // manual field): the unconsumed stash still applies to THAT code.
         model.codeInput.value = CODE
         model.activateNow()
-        assertEquals("tx_qa_001", model.pendingConfirmation.value?.transactionId)
+        assertEquals("tx_qa_001", model.pending()?.transactionId)
     }
 
     @Test
@@ -279,14 +281,13 @@ class AppViewModelLinkTests {
         val model = makeModel()
         model.handleOpenUrl(LINK_TX)
         model.awaitPending()
-        model.confirmActivation()
         model.declineConsent()
         assertEquals(AppViewModel.Phase.Idle, model.phase.value)
         assertNull(model.activeStudy.value)
         assertTrue("no enroll call", enrollBodies.isEmpty())
         model.codeInput.value = CODE
         model.activateNow()
-        assertNull("stash cleared with the decline", model.pendingConfirmation.value?.transactionId)
+        assertNull("stash cleared with the decline", model.pending()?.transactionId)
     }
 
     // MARK: - rule 4: one enrollment id per enrollment, reused on retry
@@ -296,7 +297,6 @@ class AppViewModelLinkTests {
         val model = makeModel()
         model.handleOpenUrl(LINK_TX)
         val pending = model.awaitPending()
-        model.confirmActivation()
 
         enrollStatus = 500
         model.acceptConsentNow()

@@ -13,14 +13,13 @@ import one.moveo.studywrapper.DebugHooks
 import one.moveo.studywrapper.browser.LeadSurveyLauncher
 
 /// Root routing (← iOS RootView.swift): activeStudy+idle → StudyHome;
-/// endedStudy → EndedStudy (revoked vs ended wording); else Activation.
-/// Home shows only when nothing is in flight: a deep-link replacement (new
-/// code while a study is active) must be able to run its confirm → consent
-/// flow, which ActivationScreen owns.
+/// endedStudy → EndedStudy (completed / revoked / ended wording); else
+/// Activation. Home shows only when nothing is in flight: a deep-link
+/// replacement (new code while a study is active) must be able to run its
+/// consent flow, which ActivationScreen owns.
 @Composable
 fun RootScreen(model: AppViewModel) {
     val phase by model.phase.collectAsState()
-    val pending by model.pendingConfirmation.collectAsState()
     val activeStudy by model.activeStudy.collectAsState()
     val endedStudy by model.endedStudy.collectAsState()
     val browserPresented by model.browserPresented.collectAsState()
@@ -34,9 +33,9 @@ fun RootScreen(model: AppViewModel) {
             // Full-screen browser cover (the iOS fullScreenCover).
             browserPresented && study != null ->
                 StudyBrowserScreen(model, study)
-            study != null && phase is AppViewModel.Phase.Idle && pending == null ->
+            study != null && phase is AppViewModel.Phase.Idle ->
                 StudyHomeScreen(model, study)
-            study == null && ended != null && phase is AppViewModel.Phase.Idle && pending == null ->
+            study == null && ended != null && phase is AppViewModel.Phase.Idle ->
                 EndedStudyScreen(model, ended)
             else ->
                 ActivationScreen(model)

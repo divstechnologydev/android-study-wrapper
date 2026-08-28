@@ -51,6 +51,7 @@ import one.moveo.studycore.Codes
 @Composable
 fun StudyHomeScreen(model: AppViewModel, study: ActiveStudy) {
     var confirmingLeave by remember { mutableStateOf(false) }
+    var confirmingFinish by remember { mutableStateOf(false) }
 
     Column(modifier = Modifier.fillMaxSize().background(Brand.bg)) {
         HomeHeader(onLeaveRequested = { confirmingLeave = true })
@@ -97,12 +98,43 @@ fun StudyHomeScreen(model: AppViewModel, study: ActiveStudy) {
             )
 
             Text(
-                "Browse the study websites naturally — that's the whole task. You can come back here any time with Done.",
+                "Browse the study websites naturally — that's the whole task. When you're finished, tap Done in the browser to complete the study.",
                 fontSize = 13.sp,
                 lineHeight = 19.sp,
                 color = Brand.textSecondary,
             )
+
+            // Extension popup `.finish` block: hairline, hint, button.
+            Column(
+                modifier = Modifier.padding(top = 6.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                HorizontalDivider(color = Brand.border, thickness = 1.dp)
+                Text(
+                    "Done with the study tasks? Tap here to finish the study.",
+                    modifier = Modifier.padding(top = 6.dp),
+                    fontSize = 12.5.sp,
+                    lineHeight = 18.sp,
+                    color = Brand.textSecondary,
+                )
+                BrandGhostButton(
+                    text = "Finish study",
+                    onClick = { confirmingFinish = true },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
         }
+    }
+
+    if (confirmingFinish) {
+        FinishStudyDialog(
+            hasLeadOut = study.config.flow.leadOutUrl != null,
+            onConfirm = {
+                confirmingFinish = false
+                model.finishStudy()
+            },
+            onDismiss = { confirmingFinish = false },
+        )
     }
 
     if (confirmingLeave) {

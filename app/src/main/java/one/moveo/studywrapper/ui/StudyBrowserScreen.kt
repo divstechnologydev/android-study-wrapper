@@ -51,6 +51,12 @@ import one.moveo.studycore.ActiveStudy
 /// WebView with minimal chrome (Done, back, reload, study menu). Not a
 /// general browser: no address bar, no tabs; it opens on the study's start
 /// origin (a0.1).
+///
+/// Done = "I'm finished with the study tasks" (the extension popup's
+/// "Finish study"): it asks for confirmation, then opens the closing page
+/// (lead-out) and completes the study (§a2.8). System back is the Android
+/// way *out* without finishing — page history first, then the study home,
+/// where tracking continues (plan §6).
 @Composable
 fun StudyBrowserScreen(model: AppViewModel, study: ActiveStudy) {
     if (!isWebViewSupported()) {
@@ -59,6 +65,7 @@ fun StudyBrowserScreen(model: AppViewModel, study: ActiveStudy) {
     }
 
     val context = LocalContext.current
+    var confirmingFinish by remember { mutableStateOf(false) }
     var confirmingLeave by remember { mutableStateOf(false) }
     var showingGoTo by remember { mutableStateOf(false) }
     val controller = remember { StudyWebViewController(context, model) }
@@ -81,7 +88,7 @@ fun StudyBrowserScreen(model: AppViewModel, study: ActiveStudy) {
                 .padding(horizontal = 4.dp, vertical = 2.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            TextButton(onClick = { model.closeBrowser() }) {
+            TextButton(onClick = { confirmingFinish = true }) {
                 Text("Done", color = Brand.text, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
             }
             IconButton(onClick = { controller.goBackIfPossible() }, modifier = Modifier.size(40.dp)) {
@@ -138,6 +145,17 @@ fun StudyBrowserScreen(model: AppViewModel, study: ActiveStudy) {
         AndroidView(
             factory = { controller.createWebView() },
             modifier = Modifier.fillMaxSize(),
+        )
+    }
+
+    if (confirmingFinish) {
+        FinishStudyDialog(
+            hasLeadOut = study.config.flow.leadOutUrl != null,
+            onConfirm = {
+                confirmingFinish = false
+                model.finishStudy()
+            },
+            onDismiss = { confirmingFinish = false },
         )
     }
 

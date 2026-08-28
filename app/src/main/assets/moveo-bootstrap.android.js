@@ -7,6 +7,11 @@
 //   { type: "target" }                       event_match target hit
 //   { type: "ownTag", hostname }             site ships its own Moveo tag
 //   { type: "initialized", hostname }        tag init health ping (QA)
+//   - native → page: window.__moveoFlush(timeoutMs) drains the tag's event
+//     buffer and resolves once the POSTs have landed (or the timeout hits),
+//     so the app can finish a study without losing buffered events. (Native
+//     evaluates it and relays the result as a { type: "flushed" } post —
+//     evaluateJavascript cannot await a Promise.)
 //
 // The target-match block between the markers is a verbatim copy of the
 // extension's (itself pinned to src/target-match.js by the extension's CI);
@@ -113,6 +118,73 @@
     evaluate({ prop: { sg: "global", eA: "page_view", eT: "page", eV: path, sc: path } });
   }
 
+  /**
+   * Flush bridge for study completion. The tag batches events (5 s interval /
+   * size threshold) and its senders — flush() and sendEventImmediate() — call
+   * fetch without returning the promise, so nothing can be awaited as-is.
+   * Both are wrapped here to capture the fetch promises they create
+   * synchronously (window.fetch is swapped only for the duration of the
+   * call — the DEBUG ingest redirect and the event spy sit underneath and
+   * keep working). window.__moveoFlush(timeoutMs) then drains the buffer and
+   * resolves when every tracked POST has settled, or at the timeout.
+   * Observation only: nothing is mutated, blocked, or delayed.
+   */
+  function installFlushBridge(inst) {
+    var inFlight = [];
+    function untrack(p) {
+      var i = inFlight.indexOf(p);
+      if (i >= 0) inFlight.splice(i, 1);
+    }
+    function tracked(fn) {
+      return function () {
+        var origFetch = window.fetch;
+        var calls = [];
+        window.fetch = function () {
+          var p = origFetch.apply(this, arguments);
+          calls.push(p);
+          return p;
+        };
+        try {
+          return fn.apply(this, arguments);
+        } finally {
+          window.fetch = origFetch;
+          calls.forEach(function (p) {
+            var settled = Promise.resolve(p).then(
+              function () {},
+              function () {}
+            );
+            inFlight.push(settled);
+            settled.then(function () {
+              untrack(settled);
+            });
+          });
+        }
+      };
+    }
+    if (typeof inst.flush === "function") inst.flush = tracked(inst.flush);
+    if (typeof inst.sendEventImmediate === "function") {
+      inst.sendEventImmediate = tracked(inst.sendEventImmediate);
+    }
+
+    window.__moveoFlush = function (timeoutMs) {
+      try {
+        inst.flush();
+      } catch (e) {
+        // Never let a tag error block completion.
+      }
+      var waiting = inFlight.slice();
+      var done = Promise.all(waiting).then(function () {
+        return { sent: waiting.length, timedOut: false };
+      });
+      var timeout = new Promise(function (resolve) {
+        setTimeout(function () {
+          resolve({ sent: waiting.length, timedOut: true });
+        }, typeof timeoutMs === "number" ? timeoutMs : 2500);
+      });
+      return Promise.race([done, timeout]);
+    };
+  }
+
   var extInitialized = false;
   var realInit = window.MoveoOne.init;
 
@@ -155,6 +227,7 @@
     installTargetHooks(instance, __MOVEO_PAYLOAD__.targetAction.props);
   }
   if (instance) {
+    installFlushBridge(instance);
     post({ type: "initialized", hostname: hostnameLower() });
   }
 })();

@@ -59,9 +59,11 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
-        // A lead-out queued while a lead survey Custom Tab was up gets its
-        // turn when we return (the iOS leadSheetDismissed retry, §a2.6).
-        model.presentDueLeadOut()
+        // Returning from a lead survey Custom Tab (or the system browser on
+        // GMS-less devices) is the Android "lead sheet dismissed" signal (the
+        // iOS leadSheetDismissed, §a2.6/§a2.8): apply a completion that
+        // waited for the closing page, else retry a queued lead-out.
+        model.activityResumed()
     }
 
     private fun handleIntent(intent: Intent?) {

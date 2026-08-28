@@ -15,10 +15,7 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
-import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -28,28 +25,28 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import one.moveo.studywrapper.AppViewModel
 import one.moveo.studywrapper.R
-import one.moveo.studycore.Codes
 
-/// Screen 1 of 3: setup link → fetch → validate → confirmation sheet
-/// (← iOS ActivationView.swift). Links only for now: the extension popup's
-/// "Link not working? Enter the code manually" fallback is deliberately NOT
-/// shown (product decision 2026-08-27) — a typed code cannot carry the panel
-/// provider's transaction id, so participants are steered to the link. The
-/// model still accepts a code/link in `codeInput` (deep links, DEBUG
-/// MOVEO_AUTO_CODE), so re-adding the field later is UI-only. Composition
-/// mirrors the extension's auth pages (brand kit v3): faint constellation
-/// background, centered wordmark, one elevated card.
+/// Screen 1 of 3: setup link → fetch → validate → consent (no intermediate
+/// summary sheet — the consent page carries the study name, tracked
+/// websites and the replacement notice, exactly like the extension's link
+/// flow; removed 2026-08-28 with iOS). (← iOS ActivationView.swift.)
+/// Links only for now: the extension popup's "Link not working? Enter the
+/// code manually" fallback is deliberately NOT shown (product decision
+/// 2026-08-27) — a typed code cannot carry the panel provider's transaction
+/// id, so participants are steered to the link. The model still accepts a
+/// code/link in `codeInput` (deep links, DEBUG MOVEO_AUTO_CODE), so
+/// re-adding the field later is UI-only. Composition mirrors the
+/// extension's auth pages (brand kit v3): faint constellation background,
+/// centered wordmark, one elevated card.
 @Composable
 fun ActivationScreen(model: AppViewModel) {
     val phase by model.phase.collectAsState()
-    val pending by model.pendingConfirmation.collectAsState()
 
     when (val p = phase) {
         is AppViewModel.Phase.Idle, is AppViewModel.Phase.Fetching ->
@@ -74,8 +71,6 @@ fun ActivationScreen(model: AppViewModel) {
         is AppViewModel.Phase.Consent ->
             ConsentScreen(model, p.pending)
     }
-
-    pending?.let { StudySummarySheet(model, it) }
 }
 
 /// Constellation background + wordmark + card — the extension's
@@ -165,92 +160,5 @@ fun StatusCard(
         Text(title, fontSize = 20.sp, fontWeight = FontWeight.SemiBold, color = Brand.text)
         BrandNotice(text = message, background = noticeBg, foreground = noticeFg)
         BrandPrimaryButton(text = buttonLabel, onClick = action, modifier = Modifier.fillMaxWidth())
-    }
-}
-
-/// The activation confirmation: what the study is, which sites it covers
-/// (wording derives from the same origin list the guard + policy enforce),
-/// and the explicit replacement warning when another study is active.
-/// (Android idiom: bottom sheet instead of the iOS page sheet; swipe-dismiss
-/// acts as Cancel — same invariant, nothing stored.)
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun StudySummarySheet(model: AppViewModel, pending: AppViewModel.PendingActivation) {
-    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    ModalBottomSheet(
-        onDismissRequest = { model.cancelActivation() },
-        sheetState = sheetState,
-        containerColor = Brand.bg,
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = 20.dp)
-                .padding(bottom = 24.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
-        ) {
-            // Centered title; the actions live in the button row at the
-            // bottom of the sheet where they read as real buttons.
-            Text(
-                "Join study",
-                fontSize = 16.sp,
-                fontWeight = FontWeight.SemiBold,
-                color = Brand.text,
-                modifier = Modifier.align(Alignment.CenterHorizontally),
-            )
-
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                BrandEyebrow("Study")
-                Text(
-                    pending.config.study.name,
-                    fontSize = 20.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = Brand.text,
-                )
-                Text(
-                    "Code ${Codes.group(pending.code)}",
-                    fontSize = 12.sp,
-                    fontFamily = FontFamily.Monospace,
-                    color = Brand.textMuted,
-                )
-            }
-
-            pending.replacingName?.let { replacing ->
-                BrandNotice(
-                    text = "Continuing will replace your current study “$replacing” — its tracking stops.",
-                )
-            }
-
-            Column(
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-                modifier = Modifier.padding(top = 8.dp),
-            ) {
-                BrandEyebrow("Websites this study tracks")
-                OriginChips(origins = pending.config.tracking.origins)
-                Text(
-                    text = "Tracking only happens on these websites (including their subdomains), inside this app, and only after you give consent on the next screen.",
-                    fontSize = 13.sp,
-                    lineHeight = 19.sp,
-                    color = Brand.textSecondary,
-                )
-            }
-
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                BrandSecondaryButton(
-                    text = "Cancel",
-                    onClick = { model.cancelActivation() },
-                    modifier = Modifier.weight(1f),
-                )
-                BrandPrimaryButton(
-                    text = "Continue",
-                    onClick = { model.confirmActivation() },
-                    modifier = Modifier.weight(1f),
-                )
-            }
-        }
     }
 }

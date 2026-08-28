@@ -216,11 +216,14 @@ matrix: [docs/a1-transactions.md](a1-transactions.md). *Status 2026-08-27:
 steps 1–3 done (studycore + 20 tests, model/activity/manifest + 12 app JVM
 tests, link-only activation card, gear ids); verified on the emulator vs the
 mock and on the Galaxy A52s against dev (step 4). App side complete;
-`assetlinks.json` + landing page remain platform-side.*
+`assetlinks.json` + landing page remain platform-side. 2026-08-28: the
+study-summary confirmation sheet between link and consent was removed
+(with iOS) — a link now goes fetch → consent directly; the consent screen
+already names the study, lists the origins and carries the replace warning.*
 
 **Exit criteria:** `adb shell am start -a android.intent.action.VIEW -d
 "https://app.moveo.one/extension/config/<code>?transaction_id=tx"` opens the
-app into the confirmation sheet on a release-signed build; scheme link does
+app straight into the consent screen on a release-signed build; scheme link does
 the same; the mock's enroll log shows `enrollmentId e_…, transactionId tx`
 and the lead-out Custom Tab URL carries `transaction_id=tx`.
 
@@ -245,8 +248,10 @@ verbatim from `Brand.swift` (near-black on warm neutrals, mono eyebrows,
 orange reserved for the live-tracking signal; light-only theme pinned).
 
 Flow invariants to preserve exactly:
-- Confirmation sheet (study name, code, origin chips, replacement warning)
-  **before** consent; nothing stored, no backend call until Accept.
+- ~~Confirmation sheet (study name, code, origin chips, replacement warning)
+  **before** consent~~ — removed 2026-08-28 (a1.4 note): link → consent
+  directly, the consent screen carries the same facts; nothing stored, no
+  backend call until Accept.
 - Accept → `POST /enroll`; only on success does the study become active
   locally; 409 is success. Network/server enroll failures keep the
   participant on consent with an inline retry message; 410 → studyEnded;
@@ -351,7 +356,8 @@ runtime flags:
   export/clear, tag-health ping, vendored-tag provenance.
 - Scripted QA hooks: intent extras replace the iOS `MOVEO_*` env vars —
   `adb shell am start … -e MOVEO_API_BASE … -e MOVEO_AUTO_CODE … -e
-  MOVEO_AUTO_FLOW consent|enroll|browser -e MOVEO_AUTO_NAV <url>`.
+  MOVEO_AUTO_FLOW enroll|browser -e MOVEO_AUTO_NAV <url>` (a link already
+  lands on consent, so there is no `consent` step to auto-jump to).
   Debug builds only; release ignores extras.
 - Debug ingest redirect (`moveo-ingest-redirect.android.js`, placeholders
   substituted natively) so dev studies' events reach the dev ingestion host;
@@ -363,9 +369,34 @@ runtime flags:
   `scripts/mock-backend.mjs` (same `--origins`, `/__end`, `/__revive`).
 
 **Exit criteria (a2):** full happy path on emulator against the mock backend
-— typed code → confirm → consent → enroll → home → browser opens start URL →
+— setup link → consent → enroll → home → browser opens start URL →
 tag initialized ping → url_match target fires → lead-out after 2s → kill
 switch via `/__end` deactivates on next foreground → leave clears data.
+
+---
+
+### a2.8 Finishing a study (Done / Finish study / target completes)
+
+Port of the iOS `done-finish` branch / extension `done-finish` branch
+(2026-08-28): reaching the target **completes** the study (via the lead-out
+when there is one, right at the target otherwise), and the participant can
+finish it themselves — browser **Done** or home **Finish study** →
+"Finish this study?" confirmation → lead-out with the `transaction_id` →
+complete. Completion is persisted immediately (`EndedStudy.completed`,
+active study cleared); the screen transition waits for the closing page to
+close, which on Android is `MainActivity.onResume` (Custom Tab / system
+browser returned). Before the browser is torn down the injected tag is
+asked to flush its event buffer (`__moveoFlush`, bounded 3 s). Display name
+becomes **Moveo One User Research**. Full design, Android decisions (resume
+as the dismissal signal, evaluateJavascript+bridge flush, system back stays
+"close without finishing") and test matrix: [docs/a2-finish.md](a2-finish.md).
+*Status 2026-08-28: implemented — studycore, model, flush bridge, UI, 11 app
+JVM tests; `./gradlew build` green. Device pass pending.*
+
+**Exit criteria:** on a device, target page → lead-out tab with
+`transaction_id` → close → "Study complete"; Done → dialog → lead-out →
+complete; home Finish study likewise; a no-lead-out study completes 2 s
+after the target; `logcat -s moveo-backend` shows `completion flush → sent N`.
 
 ---
 
@@ -550,6 +581,10 @@ Every deliberate divergence from the iOS reference, in one place:
 | Enroll marker | `client: "ios"`, `extensionVersion: "ios/<v>"` | `client: "android"`, `extensionVersion: "android/<v>"` | a0.2 |
 | Consent text version | `ios-<date>` | `android-<date>` | audit string identifies one exact displayed text |
 | Store gate | App Review, privacy labels, TestFlight | Play review, Data safety form, closed testing | distribution platform |
+| Closing-page dismissed (a2.8) | SFSafariViewController `leadSheetDismissed` | `MainActivity.onResume` → `activityResumed()` | Custom Tab / system browser gives no dismissal callback; completion is persisted first, so timing is irrelevant |
+| Completion event flush (a2.8) | `callAsyncJavaScript` awaits `__moveoFlush` | `evaluateJavascript` kicks it, result relayed as a `flushed` bridge post, native deadline | `evaluateJavascript` cannot await a Promise |
+| Leaving the browser without finishing (a2.8) | none in Release (Done = finish; debug-only close item) | system back at history root → study home, tracking continues | back is non-negotiable Android navigation; home carries the explicit Finish study button |
+| Completion data clearing (a2.8) | per-origin | wholesale, same as leave | see leave-study row |
 
 Anything not in this table is expected to behave identically to the iOS app;
 a difference found later is a bug in one of the two.
