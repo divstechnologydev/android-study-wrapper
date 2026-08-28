@@ -136,6 +136,21 @@ on arrival and `lead: LEAD_OUT <url>` with the echoed id; the mock backend
 logs `enrollmentId …, transactionId …` on enroll; the gear screen shows the
 active study's ids.
 
+## Study instructions on the consent screen
+
+`study.instructions` (config-schema §2.1, optional, ≤ 2000 chars) is shown
+on the consent page under "Instructions", between the replace notice and the
+tracked websites — same placement as the extension's consent tab and iOS.
+It is **plain text only**: `studycore/Instructions.kt` is a port of the
+extension's `src/instructions.js` (blank line = paragraph break, `- `/`* `
+lines = bullets, single newline = line break, control/zero-width/bidi
+characters stripped, no Markdown/HTML/links ever interpreted) and
+`ConsentScreen` renders every block with a plain `Text(String)` — no
+annotated strings, no autolink. Absent or blank ⇒ the section is hidden.
+Not consent wording, so `ConsentConstants.TEXT_VERSION` is unchanged.
+`InstructionsTests` pins the extension's case table; the validator rejects
+> 2000 chars (vendored fixture `invalid-instructions-too-long.json`).
+
 ## Finishing a study
 
 Parity with the extension's and iOS's `done-finish` branches

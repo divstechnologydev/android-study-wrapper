@@ -21,6 +21,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalUriHandler
@@ -32,6 +33,7 @@ import androidx.compose.foundation.clickable
 import one.moveo.studywrapper.AppViewModel
 import one.moveo.studywrapper.R
 import one.moveo.studycore.BackendConstants
+import one.moveo.studycore.Instructions
 
 /// Screen 2 of 3: the consent form (← iOS ConsentView.swift). Wording ported
 /// from the extension's `consent/consent.html` with device-appropriate edits
@@ -131,6 +133,22 @@ private fun ConsentCard(
             )
         }
 
+        // study.instructions — author text, PLAIN TEXT only (extension
+        // consent.js renderInstructions; iOS ConsentView). Hidden when there
+        // is nothing to show. Not part of the consent wording, so no
+        // TEXT_VERSION bump — it is study content, like the name and the
+        // origins. Rendered with plain `Text(String)`: no AnnotatedString,
+        // no autolink, so author prose can never become styling or a link.
+        val instructionBlocks = remember(pending.config.study.instructions) {
+            Instructions.parse(pending.config.study.instructions)
+        }
+        if (instructionBlocks.isNotEmpty()) {
+            SectionTitle("Instructions")
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                instructionBlocks.forEach { block -> InstructionBlock(block) }
+            }
+        }
+
         SectionTitle("Websites this study tracks")
         Explain("The study runs inside this app's built-in browser, and only on these websites (including their subdomains):")
         OriginChips(
@@ -200,5 +218,23 @@ private fun Bullet(text: String) {
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         Text("•", fontSize = 14.sp, color = Brand.textMuted)
         Text(text, fontSize = 14.sp, lineHeight = 20.sp, color = Brand.textSecondary)
+    }
+}
+
+/// One parsed instructions block. Rule 6: a single newline stays a line
+/// break — the lines are joined with "\n" and never re-flowed.
+@Composable
+private fun InstructionBlock(block: Instructions.Block) {
+    when (block) {
+        is Instructions.Block.Paragraph -> Text(
+            text = block.lines.joinToString("\n"),
+            fontSize = 14.sp,
+            lineHeight = 20.sp,
+            color = Brand.textSecondary,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        is Instructions.Block.ListBlock -> Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
+            block.items.forEach { item -> Bullet(item) }
+        }
     }
 }

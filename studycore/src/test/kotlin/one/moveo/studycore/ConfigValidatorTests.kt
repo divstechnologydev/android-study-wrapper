@@ -52,6 +52,41 @@ class ConfigValidatorTests {
         }
     }
 
+    // MARK: - study.instructions (config-schema §2.1; run-tests.mjs §10)
+
+    @Test
+    fun instructionsCarriedThroughFromValidFull() {
+        val config = validConfig(loadFixture("valid-full.json"))
+        val instructions = checkNotNull(config.study.instructions)
+        assertTrue(instructions.startsWith("Thanks for taking part!"))
+        assertTrue(Instructions.parse(instructions).isNotEmpty())
+    }
+
+    @Test
+    fun instructionsAbsentStaysNull() {
+        assertNull(validConfig(loadFixture("valid-minimal.json")).study.instructions)
+    }
+
+    @Test
+    fun instructionsValidationMatchesExtension() {
+        fun verdict(value: JsonElement?): List<String> {
+            val json = loadFixture("valid-minimal.json")
+            val study = json["study"]!!.jsonObject
+            val patchedStudy = if (value != null) JsonObject(study + ("instructions" to value)) else study
+            return when (val result = ConfigValidator.validate(JsonObject(json + ("study" to patchedStudy)))) {
+                is ConfigValidator.ValidationResult.Valid -> emptyList()
+                is ConfigValidator.ValidationResult.Invalid -> result.errors
+            }
+        }
+        val expected = "study.instructions: must be a string (max 2000 chars)"
+        assertEquals("exactly the cap is fine", emptyList<String>(), verdict(JsonPrimitive("x".repeat(2000))))
+        assertEquals(listOf(expected), verdict(JsonPrimitive("x".repeat(2001))))
+        assertEquals("non-string", listOf(expected), verdict(JsonPrimitive(42)))
+        assertEquals("JS: null !== undefined → fails the string check", listOf(expected), verdict(JsonNull))
+        assertEquals("blank is valid — the renderer hides the section", emptyList<String>(), verdict(JsonPrimitive("   ")))
+        assertEquals(emptyList<String>(), verdict(null))
+    }
+
     @Test
     fun futureVersionSetsNeedsAppUpdate() {
         val result = ConfigValidator.validate(loadFixture("invalid-future-version.json"))

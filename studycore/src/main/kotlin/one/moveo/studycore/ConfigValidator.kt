@@ -71,6 +71,15 @@ object ConfigValidator {
             if (status !in listOf("active", "ended")) {
                 errors += "study.status: must be 'active' | 'ended'"
             }
+            // `instructions !== undefined` in JS: a present-but-null value is
+            // NOT absent — it fails the string check, same here (JsonNull is
+            // not a string primitive). Length in UTF-16 units = JS `.length`.
+            if (study.containsKey("instructions")) {
+                val instr = study["instructions"]
+                if (!(asString(instr) != null && strLen(instr) <= Instructions.MAX_LENGTH)) {
+                    errors += "study.instructions: must be a string (max ${Instructions.MAX_LENGTH} chars)"
+                }
+            }
         } else {
             errors += "study: required object"
         }
@@ -159,7 +168,7 @@ object ConfigValidator {
 
         val config = StudyConfig(
             schemaVersion = version,
-            study = StudyConfig.Study(id = id, name = name, status = status),
+            study = StudyConfig.Study(id = id, name = name, status = status, instructions = asString(s["instructions"])),
             tracking = StudyConfig.Tracking(
                 token = token,
                 apiUrl = apiUrl,

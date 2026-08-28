@@ -47,6 +47,11 @@ data class StudyConfig(
         val id: String,
         val name: String,
         val status: Status,
+        /// Participant-facing task instructions for the consent screen
+        /// (config-schema §2.1). PLAIN TEXT — rendered only through
+        /// `Instructions.parse`, never interpreted as markup. Absent/blank
+        /// ⇒ the section is not shown. Additive field, no schemaVersion bump.
+        val instructions: String? = null,
     )
 
     /// Backend computes effective status at request time; anything non-active
