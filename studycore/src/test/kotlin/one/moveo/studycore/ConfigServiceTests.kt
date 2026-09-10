@@ -203,6 +203,67 @@ class ConfigServiceTests {
         assertEquals("2026-08-01T09:00:00Z", success.enrolledAt)
     }
 
+    // MARK: - reportSession
+
+    /// The retry backoff is real time — zero it so failure cases don't
+    /// stall the suite.
+    private suspend fun report(
+        code: String = "TESTCODE1234",
+        enrollmentId: String = "e_1",
+        sessionId: String = "sess_0123456789",
+    ): Boolean = service().reportSession(
+        code = code, participantId = "p_abc", enrollmentId = enrollmentId,
+        sessionId = sessionId, retryDelayMillis = 0,
+    )
+
+    @Test
+    fun reportSessionPostsTheLinkBody() = runBlocking {
+        respond(204)
+        assertTrue(report(code = "test code 1234"))
+        val request = server.takeRequest()
+        assertEquals("/api/v1/extension-config/TESTCODE1234/sessions", request.path)
+        val body = Json.parseToJsonElement(request.body.readUtf8()).jsonObject
+        assertEquals("e_1", body["enrollmentId"]?.jsonPrimitive?.content)
+        assertEquals("p_abc", body["participantId"]?.jsonPrimitive?.content)
+        assertEquals("sess_0123456789", body["sessionId"]?.jsonPrimitive?.content)
+    }
+
+    @Test
+    fun reportSessionDoesNotRetryClientErrors() = runBlocking {
+        // Endpoint not deployed yet / malformed — a retry fixes nothing
+        // (extension parity), and completion has already moved on anyway.
+        respond(404)
+        assertFalse(report())
+        assertEquals(1, server.requestCount)
+    }
+
+    @Test
+    fun reportSessionRetriesOnceOnServerErrorsAndRateLimits() = runBlocking {
+        respond(500)
+        respond(204)
+        assertTrue("second attempt lands", report())
+        assertEquals(2, server.requestCount)
+
+        respond(429)
+        respond(200)
+        assertTrue("429 is retryable", report())
+        assertEquals(4, server.requestCount)
+
+        respond(503)
+        respond(503)
+        assertFalse("one retry only, then give up", report())
+        assertEquals(6, server.requestCount)
+    }
+
+    @Test
+    fun reportSessionRefusesInvalidInputWithoutANetworkCall() = runBlocking {
+        assertFalse("charset rule", report(sessionId = "bad session id!"))
+        assertFalse("too short", report(sessionId = "short"))
+        assertFalse("missing enrollment id", report(enrollmentId = ""))
+        assertFalse("malformed code", report(code = "ab"))
+        assertEquals("no request expected", 0, server.requestCount)
+    }
+
     @Test
     fun enrollErrorMapping() = runBlocking {
         val cases = listOf(

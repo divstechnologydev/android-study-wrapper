@@ -11,6 +11,9 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runTest
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import okhttp3.mockwebserver.Dispatcher
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
@@ -46,6 +49,12 @@ class AppViewModelFinishTests {
     /// When set, config responses block until released (re-validation race).
     @Volatile
     private var configGate: CountDownLatch? = null
+
+    /// POST /{code}/sessions bodies as they arrive (server dispatch thread —
+    /// synchronized), with a latch so tests can await the fire-and-forget
+    /// report crossing the real network.
+    private val sessionRequests = java.util.Collections.synchronizedList(mutableListOf<Pair<String, String>>())
+    private val sessionReported = CountDownLatch(1)
 
     private var clock: Instant = Instant.parse("2026-08-28T10:00:00Z")
 
@@ -101,6 +110,11 @@ class AppViewModelFinishTests {
             override fun dispatch(request: RecordedRequest): MockResponse {
                 val path = request.path.orEmpty()
                 return when {
+                    path.endsWith("/sessions") -> {
+                        sessionRequests += path to request.body.readUtf8()
+                        sessionReported.countDown()
+                        MockResponse().setResponseCode(204)
+                    }
                     path.endsWith("/enroll") -> MockResponse().setResponseCode(201)
                         .setBody("""{"participantId":"p_abc","enrolledAt":"2026-08-28T10:00:00Z"}""")
                     path.endsWith("/$CODE") || path.endsWith("/$NOLEAD") -> {
@@ -385,6 +399,69 @@ class AppViewModelFinishTests {
         model.finishStudy()
         model.endedStudy.await { it != null }
         assertTrue(store.ownTagHosts.isEmpty())
+    }
+
+    // MARK: - session-id link (extension e37d054 "session id passed on study end")
+
+    @Test
+    fun sessionBridgePostStoresTheLatestIdOnTheActiveStudy() = runTest(timeout = 30.seconds) {
+        val model = makeModel()
+        model.enrollAndOpen(LINK_NOLEAD)
+
+        model.handleBridgeMessage("session", mapOf("sessionId" to "sess_aaaa1111"))
+        assertEquals("sess_aaaa1111", store.activeStudy?.sessionId)
+        // A later page load reports again — the latest one wins.
+        model.handleBridgeMessage("session", mapOf("sessionId" to "sess_bbbb2222"))
+        assertEquals("sess_bbbb2222", store.activeStudy?.sessionId)
+        assertEquals("UI mirror follows storage", "sess_bbbb2222", model.activeStudy.value?.sessionId)
+    }
+
+    @Test
+    fun invalidOrStudylessSessionPostsAreIgnored() = runTest(timeout = 30.seconds) {
+        val model = makeModel()
+        model.enrollAndOpen(LINK_NOLEAD)
+
+        // Page-side input: the extension's charset/length rule, re-checked.
+        model.handleBridgeMessage("session", mapOf("sessionId" to "bad session id!"))
+        model.handleBridgeMessage("session", mapOf("sessionId" to "short"))
+        model.handleBridgeMessage("session", mapOf("hostname" to "example.com"))
+        assertNull(store.activeStudy?.sessionId)
+
+        // Stale page after leave: nothing to attach to, nothing crashes.
+        model.leaveStudy()
+        model.handleBridgeMessage("session", mapOf("sessionId" to "sess_aaaa1111"))
+        assertNull(store.activeStudy)
+    }
+
+    @Test
+    fun completionPostsTheSessionLinkOnce() = runTest(timeout = 30.seconds) {
+        val model = makeModel()
+        model.enrollAndOpen(LINK_NOLEAD)
+        val enrollmentId = checkNotNull(store.activeStudy?.enrollmentId)
+        model.handleBridgeMessage("session", mapOf("sessionId" to "sess_aaaa1111"))
+
+        model.finishStudy()
+        model.endedStudy.await { it != null }
+        // The report is fire-and-forget over the real network — wait for the
+        // server to see it (counted down on the dispatch thread).
+        assertTrue("session link POSTed", sessionReported.await(10, TimeUnit.SECONDS))
+        val (path, body) = sessionRequests.single()
+        assertEquals("/api/v1/extension-config/$NOLEAD/sessions", path)
+        val json = Json.parseToJsonElement(body).jsonObject
+        assertEquals(enrollmentId, json["enrollmentId"]?.jsonPrimitive?.content)
+        assertEquals("p_abc", json["participantId"]?.jsonPrimitive?.content)
+        assertEquals("sess_aaaa1111", json["sessionId"]?.jsonPrimitive?.content)
+    }
+
+    @Test
+    fun completionWithoutAnObservedSessionSendsNothing() = runTest(timeout = 30.seconds) {
+        val model = makeModel()
+        model.enrollAndOpen(LINK_NOLEAD)
+        model.finishStudy()
+        model.endedStudy.await { it != null }
+        // The skip is synchronous (no coroutine is even launched), so an
+        // empty list here is conclusive — no flaky sleep needed.
+        assertTrue(sessionRequests.isEmpty())
     }
 
     // MARK: - after completion

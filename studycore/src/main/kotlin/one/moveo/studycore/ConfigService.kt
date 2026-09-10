@@ -2,6 +2,7 @@ package one.moveo.studycore
 
 import java.io.IOException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonPrimitive
@@ -27,9 +28,10 @@ sealed class ApiResult<out T, out E> {
     val errorOrNull: E? get() = (this as? Failure)?.error
 }
 
-/// The two public backend calls, shared with the extension:
-/// `GET /{code}` (config fetch — also the kill switch) and
-/// `POST /{code}/enroll` (the billing truth).
+/// The three public backend calls, shared with the extension:
+/// `GET /{code}` (config fetch — also the kill switch),
+/// `POST /{code}/enroll` (the billing truth) and
+/// `POST /{code}/sessions` (best-effort enrollment↔session link).
 class ConfigService(
     val apiBase: HttpUrl,
     /// The app's versionName; sent as `extensionVersion: "android/<this>"`.
@@ -180,5 +182,54 @@ class ConfigService(
             422 -> ApiResult.Failure(EnrollError.Validation)
             else -> ApiResult.Failure(EnrollError.Server(reply.status))
         }
+    }
+
+    /// Link the tag's tracking session id to an enrollment at study
+    /// completion (target reached, or "Finish study"). `sessionId` is the
+    /// most recently observed one. Best effort — one retry for network /
+    /// 5xx / 429, then give up: completion truth lives in the analytics
+    /// stream, this endpoint is a convenience link, and completion must
+    /// never be blocked on it (extension enrollment.js `reportSession`).
+    /// Returns true when the backend accepted (2xx), false otherwise.
+    suspend fun reportSession(
+        code: String,
+        participantId: String,
+        enrollmentId: String,
+        sessionId: String,
+        /// Injectable so studycore tests don't sit through the real backoff.
+        retryDelayMillis: Long = 1_500,
+    ): Boolean {
+        val normalized = Codes.normalize(code) ?: return false
+        if (enrollmentId.isEmpty() || !SessionIds.isValid(sessionId)) return false
+        val url = apiBase.newBuilder().addPathSegment(normalized).addPathSegment("sessions").build()
+        val body = buildJsonObject {
+            put("enrollmentId", enrollmentId)
+            put("participantId", participantId)
+            put("sessionId", sessionId)
+        }.toString()
+
+        repeat(2) { attempt ->
+            val reply = try {
+                execute(
+                    Request.Builder()
+                        .url(url)
+                        .post(body.toRequestBody("application/json".toMediaType()))
+                        .header("Accept", "application/json")
+                        .build(),
+                )
+            } catch (e: IOException) {
+                debugLog?.invoke("POST $url → network error: ${e.message}")
+                null
+            }
+            reply?.let { debugLog?.invoke("POST $url → ${it.status}") }
+            when {
+                reply != null && reply.status in 200..299 -> return true
+                // 4xx (endpoint not deployed yet, malformed) — a retry
+                // fixes nothing.
+                reply != null && reply.status < 500 && reply.status != 429 -> return false
+                attempt == 0 -> delay(retryDelayMillis)
+            }
+        }
+        return false
     }
 }

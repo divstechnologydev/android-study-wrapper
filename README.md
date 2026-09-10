@@ -178,6 +178,14 @@ the study, and the participant can finish it themselves.
   page's `flushed` bridge reply. Debug: `completion flush → sent N timedOut
   B` on `moveo-backend`.
 - Completion also clears the study website data, like leaving.
+- **Session link** (extension parity, `session id passed on study end`;
+  [docs/a5-session-link.md](docs/a5-session-link.md)):
+  the injected bootstrap reports the tag's tracking-session id over the
+  bridge (`{ type: "session", sessionId }`, latest wins, validated +
+  stored on the active study), and completion POSTs
+  `{ enrollmentId, participantId, sessionId }` to `/{code}/sessions` —
+  best effort (one retry for network/5xx/429, never blocks completion; the
+  analytics stream stays the ground truth). No session observed ⇒ no call.
 
 ### Release build (prod)
 
