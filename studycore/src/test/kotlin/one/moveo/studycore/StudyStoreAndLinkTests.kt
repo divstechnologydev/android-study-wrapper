@@ -90,6 +90,22 @@ class StudyStoreTests {
         val json = Json.parseToJsonElement(checkNotNull(kv.getString("activeStudy"))).jsonObject
         assertFalse(json.containsKey("transactionId"))
         assertFalse(json.containsKey("enrollmentId"))
+        assertFalse(json.containsKey("sessionId"))
+    }
+
+    @Test
+    fun activeStudySessionIdRoundTripsAndLegacyRecordsDecodeWithoutIt() {
+        val store = makeStore()
+        store.activeStudy = ActiveStudy(
+            code = "TESTCODE1234", config = sampleConfig(), sessionId = "sess_0123456789",
+        )
+        assertEquals("sess_0123456789", makeStore().activeStudy?.sessionId)
+
+        // A record persisted before the session link existed has no key —
+        // it must decode with null (completion then simply skips the POST).
+        val json = Json.parseToJsonElement(checkNotNull(kv.getString("activeStudy"))).jsonObject
+        kv.putString("activeStudy", JsonObject(json - "sessionId").toString())
+        assertNull(makeStore().activeStudy?.sessionId)
     }
 
     @Test

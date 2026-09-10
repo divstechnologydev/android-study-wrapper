@@ -7,6 +7,8 @@
 //   { type: "target" }                       event_match target hit
 //   { type: "ownTag", hostname }             site ships its own Moveo tag
 //   { type: "initialized", hostname }        tag init health ping (QA)
+//   { type: "session", sessionId }           tag's tracking-session id
+//     (latest wins; linked to the enrollment at study completion)
 //   - native → page: window.__moveoFlush(timeoutMs) drains the tag's event
 //     buffer and resolves once the POSTs have landed (or the timeout hits),
 //     so the app can finish a study without losing buffered events. (Native
@@ -229,5 +231,19 @@
   if (instance) {
     installFlushBridge(instance);
     post({ type: "initialized", hostname: hostnameLower() });
+
+    // Report the tag's session id to the native side so the app can link
+    // the tracking session to the enrollment at study completion. Only OUR
+    // init reaches this point (yield paths return above), so a site's own
+    // tag sessions are never reported (extension moveo-bootstrap.js
+    // SESSION_EVENT; the bridge post is the Android seam).
+    try {
+      var sessionId = instance.sessionId;
+      if (typeof sessionId === "string" && sessionId) {
+        post({ type: "session", sessionId: sessionId });
+      }
+    } catch (e) {
+      // Never break the host page — a later page load reports again.
+    }
   }
 })();

@@ -415,6 +415,26 @@ JVM tests; `./gradlew build` green. Device pass pending.*
 complete; home Finish study likewise; a no-lead-out study completes 2 s
 after the target; `logcat -s moveo-backend` shows `completion flush → sent N`.
 
+### a2.9 Session-id link at completion
+
+Port of the extension's `e37d054 session id passed on study end (#9)`
+(2026-09-10; iOS pending): the bootstrap reports the tag's tracking-session
+id after OUR init (`{ type: "session", sessionId }` bridge post — the
+extension's MAIN→ISOLATED CustomEvent hop collapses to the existing
+`post()` seam), the model validates it (`SessionIds`, the extension's
+charset/length rule — page-side input) and stores the latest one on
+`ActiveStudy.sessionId`; `completeStudy` POSTs
+`{ enrollmentId, participantId, sessionId }` to `/{code}/sessions`
+(`ConfigService.reportSession`: one retry for network/5xx/429, best effort
+— completion truth stays in the analytics stream). No session observed, or
+a pre-enrollment-id record ⇒ no call. Server-side ends/revocations and
+leaving do NOT report (extension parity). Details:
+[docs/a5-session-link.md](a5-session-link.md).
+*Status 2026-09-10: implemented — studycore (+5 tests), bootstrap, model
+(+4 app JVM tests); `./gradlew build` green. Device pass pending (the mock
+backend has no `/sessions` route yet — it 404s, which the best-effort path
+absorbs; add the route in the extension repo to observe the body).*
+
 ---
 
 ## Phase a3 — parity verification
@@ -602,6 +622,8 @@ Every deliberate divergence from the iOS reference, in one place:
 | Completion event flush (a2.8) | `callAsyncJavaScript` awaits `__moveoFlush` | `evaluateJavascript` kicks it, result relayed as a `flushed` bridge post, native deadline | `evaluateJavascript` cannot await a Promise |
 | Leaving the browser without finishing (a2.8) | none in Release (Done = finish; debug-only close item) | system back at history root → study home, tracking continues | back is non-negotiable Android navigation; home carries the explicit Finish study button |
 | Completion data clearing (a2.8) | per-origin | wholesale, same as leave | see leave-study row |
+| Session-link report ordering (a2.9) | — (iOS pending; extension `await`s `reportSession` before deactivating) | fire-and-forget `scope.launch` after capturing the ids, storage cleared without waiting | the extension awaits only because `deactivate()` would wipe the ids it reads; Android captures them into locals first, and a2.8's persist-immediately rule outranks request ordering |
+| Session-id write serialization (a2.9) | — | none needed (plain read-modify-write) | extension chains promises because `chrome.storage` is async and tabs race; Android bridge posts and state writes share the main thread |
 
 Anything not in this table is expected to behave identically to the iOS app;
 a difference found later is a bug in one of the two.

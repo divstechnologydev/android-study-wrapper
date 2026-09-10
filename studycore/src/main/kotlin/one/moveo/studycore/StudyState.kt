@@ -46,6 +46,11 @@ data class ActiveStudy(
     /// presentation — a lost lead-out self-heals, a shown one never repeats.
     val leadOutDueAt: Instant? = null,
     val leadOutShownAt: Instant? = null,
+    /// Latest tag session id observed during the study (bridge `session`
+    /// post; the latest one wins) — POSTed to `{code}/sessions` at
+    /// completion so the backend can link the enrollment to its tracking
+    /// session (extension storage.js `activeStudy.sessionId`).
+    val sessionId: String? = null,
 )
 
 /// Local copy of the consent acceptance (the authoritative record is

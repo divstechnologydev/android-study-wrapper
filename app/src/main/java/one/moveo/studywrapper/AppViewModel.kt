@@ -26,6 +26,7 @@ import one.moveo.studycore.FlowConstants
 import one.moveo.studycore.LeadUrl
 import one.moveo.studycore.Origins
 import one.moveo.studycore.ScriptBuilder
+import one.moveo.studycore.SessionIds
 import one.moveo.studycore.SetupLink
 import one.moveo.studycore.StudyConfig
 import one.moveo.studycore.StudyStore
@@ -544,6 +545,25 @@ class AppViewModel(
             "initialized" -> {
                 if (isDebugBuild) _tagInitializedHost.value = body["hostname"]
             }
+            "session" -> {
+                // Latest tag session id for this page load (the latest one
+                // wins) — linked to the enrollment at study completion
+                // (extension SESSION_OBSERVED). Untrusted page-adjacent
+                // input: re-validate the shape even though the bootstrap
+                // only reports our own init; the impact of a spoof is
+                // bounded — at worst a wrong id is linked, and the
+                // analytics stream stays the ground truth for which
+                // sessions really happened. No serialization chain needed
+                // (unlike the extension's async storage): bridge messages
+                // and all state mutation share the main thread.
+                val sessionId = body["sessionId"] ?: return
+                if (!SessionIds.isValid(sessionId)) return
+                val study = store.activeStudy ?: return // stale page after leave/replace
+                if (study.sessionId == sessionId) return
+                val updated = study.copy(sessionId = sessionId)
+                store.activeStudy = updated
+                _activeStudy.value = updated
+            }
             "flushed" -> {
                 // Completion flush answered (the controller resolves the wait;
                 // this is the QA oracle — counts only, never payloads).
@@ -624,6 +644,7 @@ class AppViewModel(
     /// page load (null user script). Idempotent.
     private fun completeStudy(study: ActiveStudy, leadOutShownAt: Instant?) {
         if (pendingCompletion != null) return
+        reportSession(study)
         val ended = EndedStudy(
             code = study.code,
             name = study.config.study.name,
@@ -639,6 +660,28 @@ class AppViewModel(
         store.ownTagHosts = emptyMap()
         pendingCompletion = ended
         refreshUserScript()
+    }
+
+    /// Link the tag's tracking session to the enrollment — POST
+    /// `/{code}/sessions`, best effort (one retry inside ConfigService).
+    /// The ids are captured from the record BEFORE completeStudy clears
+    /// storage; the call itself is fire-and-forget so completion is
+    /// persisted without waiting on the network (the extension awaits it
+    /// only because deactivate() would wipe the ids it reads — recorded in
+    /// plan §6). Skipped when the study never observed a session or the
+    /// record predates enrollment ids — the extension's early-out.
+    private fun reportSession(study: ActiveStudy) {
+        val enrollmentId = study.enrollmentId ?: return
+        val sessionId = study.sessionId ?: return
+        val service = configService
+        scope.launch {
+            service.reportSession(
+                code = study.code,
+                participantId = store.participantId(),
+                enrollmentId = enrollmentId,
+                sessionId = sessionId,
+            )
+        }
     }
 
     /// Moves the UI to the completion screen: drains the tag's event buffer

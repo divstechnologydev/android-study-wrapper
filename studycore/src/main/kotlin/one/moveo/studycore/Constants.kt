@@ -22,6 +22,16 @@ object BackendConstants {
     const val PRIVACY_POLICY_URL = "https://www.moveo.one/privacy"
 }
 
+/// Tag tracking-session ids as the bridge reports them. The id is
+/// page-side input (the injected tag runs in the study site's page), so it
+/// is validated against the extension's exact shape rule before anything is
+/// stored or sent (extension moveo-config-bridge.js / config-service.js).
+object SessionIds {
+    private val PATTERN = Regex("^[A-Za-z0-9_-]{8,64}$")
+
+    fun isValid(raw: String?): Boolean = raw != null && PATTERN.matches(raw)
+}
+
 /// Flow timing shared with the extension (its `LEAD_OUT_DELAY_MS`).
 object FlowConstants {
     /// Delay between the target action firing and the lead-out opening.
