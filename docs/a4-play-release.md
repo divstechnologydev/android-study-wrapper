@@ -45,22 +45,27 @@ Companion docs: [plan §a4](plan.md), [assetlinks-handoff.md](assetlinks-handoff
   (IARC — utility, no UGC shown to others), target audience **18+ / not
   for children**, ads: none, news: no, government: no. Tablet screenshots
   skipped (R13).
-- [ ] **R5 — App access for reviewers.** The app has no manual code entry;
-  a reviewer sees an empty activation screen. In *App content → App
-  access* choose "all or some functionality restricted" and supply a
-  working **prod** setup link in both forms plus instructions:
-  `https://app.moveo.one/extension/config/<code>` and
-  `moveoone://config/<code>`. Until assetlinks is live the https link
-  opens the browser, so the note must point at the scheme link / the
-  landing page's "Open in app" button. Keep the test study alive for the
-  whole review window.
+- [ ] **R5 — App access for reviewers.** (revised 2026-09-30 with the a5
+  demo + code field) A reviewer can now see the whole participant flow with
+  no credentials at all: **Try a demo study** on the first screen runs
+  consent → tasks → study browser → completion on any website, recording
+  nothing. That is the answer to give in *App content → App access*, with
+  the real study as the second path: the code field takes a **prod** code
+  directly, and the setup link works in both forms
+  (`https://app.moveo.one/extension/config/<code>`,
+  `moveoone://config/<code>`; until assetlinks is live the https link opens
+  the browser, so point at the scheme link / the landing page's "Open in
+  app" button). Keep the test study alive for the whole review window.
 
 ## 2. Should fix before submitting
 
 - [ ] **R6 — data deletion path (client).** Leave/finish clears local
-  data only; server-side events stay. Publish a deletion contact (email
-  in the privacy policy, or a "Request data deletion" line on the study
-  home) and reference it in Data safety.
+  data only; server-side events stay. Since a5.2 the in-app **How it works**
+  screen tells participants to email `SupportConstants.SUPPORT_EMAIL` with
+  the study code — make sure that mailbox is monitored, that the same
+  contact is in the privacy policy, and reference it in Data safety.
+  `SupportConstants.SUPPORT_URL` must also be live before submission
+  (both review teams open it) and goes in the listing's support field.
 - [ ] **R7 — assetlinks.json (platform).** Prod host returns `[]`. Not a
   Play gate, but needed for link-first activation. Requires the **Play
   App Signing** SHA-256, which only exists after the first Play Console

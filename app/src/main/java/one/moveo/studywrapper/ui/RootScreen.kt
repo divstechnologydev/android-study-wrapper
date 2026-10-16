@@ -9,7 +9,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import one.moveo.studywrapper.AppViewModel
-import one.moveo.studywrapper.DebugHooks
 import one.moveo.studywrapper.browser.LeadSurveyLauncher
 
 /// Root routing (← iOS RootView.swift): activeStudy+idle → StudyHome;
@@ -39,12 +38,6 @@ fun RootScreen(model: AppViewModel, modifier: Modifier = Modifier) {
                 EndedStudyScreen(model, ended)
             else ->
                 ActivationScreen(model)
-        }
-        // Debug builds overlay a gear (the iOS nav-bar toolbar item); the
-        // release source set makes this a no-op — the QA surface does not
-        // exist in the release binary (§a2.7).
-        if (!browserPresented) {
-            DebugHooks.DebugGearOverlay(model)
         }
     }
 

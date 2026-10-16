@@ -67,7 +67,7 @@ descriptions are required.
 
 - Icon: exists (adaptive `|M>` mark, iOS AppIcon parity).
 - Screenshots: minimum 3 portrait phone shots. Capture from a
-  **huaweiRelease** install (no gear icon): activation screen, consent
+  **huaweiRelease** install: activation screen, consent
   screen, study home, study browser on a demo study. Reuse whatever the
   Play a4.2 listing settles on so the two stores tell one story.
 - Description: state plainly that this is a research-participant app —
@@ -91,8 +91,7 @@ The Pixel AVD cannot simulate a GMS-less device. In AppGallery Connect →
 Quality → **Cloud Debugging**, rent a real Huawei device (pick one without
 GMS, e.g. a P40/nova series on EMUI 11+) and verify:
 
-1. Install `app-huawei-release.apk`, cold start → activation screen, no
-   gear icon.
+1. Install `app-huawei-release.apk`, cold start → activation screen.
 2. Enroll with a dev/test code end-to-end (consent → home → browser;
    config GET + enroll POST succeed).
 3. Off-origin link tap → opens in Huawei Browser (Custom Tabs provider or

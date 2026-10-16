@@ -334,7 +334,7 @@ fun Modifier.brandCard(): Modifier = this
 /// repeat-forever brand animations — same rule as iOS. Also keeps the app
 /// fully render-idle for QA tooling (uiautomator waits for idle).
 @Composable
-private fun animationsEnabled(): Boolean {
+internal fun animationsEnabled(): Boolean {
     val context = androidx.compose.ui.platform.LocalContext.current
     return remember {
         android.provider.Settings.Global.getFloat(

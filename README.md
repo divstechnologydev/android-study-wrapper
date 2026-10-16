@@ -23,9 +23,12 @@ package:
 
 One codebase, two build types — the Android analogue of the iOS Debug/Release
 split. **Debug** compiles in the QA surface from the `app/src/debug` source
-set (gear icon + debug settings screen, event spy, API-base/ingest overrides,
-`MOVEO_*` intent extras, cleartext-to-localhost network config, relaxed
-tag-endpoint guard for dev configs). **Release** contains none of that code —
+set (event spy, API-base/ingest overrides, `MOVEO_*` intent extras,
+cleartext-to-localhost network config, relaxed tag-endpoint guard for dev
+configs). It has **no on-screen entry point** — every hook is driven by
+intent extras, so no QA affordance can show up in a screenshot or under a
+reviewer's thumb (2026-10-01, with iOS; `DebugSettingsScreen` is still in the
+debug source set, unreferenced, if you want the panel back). **Release** contains none of that code —
 the `app/src/release` source set replaces every hook with a no-op, so the
 binary is pinned to the prod backend and the strict config guard. Nothing to
 strip manually; a release build *cannot* expose debug features.
@@ -42,8 +45,8 @@ Day-to-day development uses `playDebug`.
 # Build + install on the connected device/emulator
 ./gradlew :app:installPlayDebug
 
-# Launch pointed at the DEV environment (the override persists in prefs;
-# also settable later via the in-app gear → "Config API base override")
+# Launch pointed at the DEV environment (the override persists in prefs,
+# so later launches need the extra only to change it)
 adb shell am start -n one.moveo.studywrapper/.MainActivity \
   -e MOVEO_API_BASE https://dev-pigeon.moveo.one/api/v1/extension-config \
   -e MOVEO_EVENT_SPY 1
@@ -72,10 +75,11 @@ adb logcat -s moveo-backend moveo-events
 
 ## Setup links (deep links)
 
-The setup link is the **only** way into a study — manual code entry is
-intentionally not in the UI (a typed code cannot carry the panel provider's
-transaction id; the model still accepts one via `codeInput` for the DEBUG
-`MOVEO_AUTO_CODE` hook, so re-adding the field later is UI-only). Both link
+The setup link is the primary way into a study. The activation card also
+has a manual code field as a fallback — it accepts a bare code or a pasted
+setup link; only the pasted link keeps the panel provider's transaction id
+(a typed code cannot carry it). The reserved code `MOVEODEMO` is intercepted
+before any network call and runs the demo (see below). Both link
 shapes land in `MainActivity.handleIntent` → `AppViewModel.handleOpenUrl`
 and go straight to fetch → consent (no summary sheet in between — the
 consent page names the study, lists the tracked sites and carries the
@@ -136,8 +140,27 @@ adb shell pm verify-app-links --re-verify one.moveo.studywrapper
 
 Oracles: `adb logcat -s moveo-backend` prints `openURL code … transactionId …`
 on arrival and `lead: LEAD_OUT <url>` with the echoed id; the mock backend
-logs `enrollmentId …, transactionId …` on enroll; the gear screen shows the
-active study's ids.
+logs `enrollmentId …, transactionId …` on enroll.
+
+## Demo study (no invitation needed)
+
+Anyone — a prospective customer, a store reviewer, you — can run the whole
+participant flow without a study code: **Try a demo study** on the activation
+screen (or the reserved code `MOVEODEMO`, or the study menu's **How it
+works** → *Try the demo study*). Pick any website; the demo runs consent →
+instructions → study browser → completion against it.
+
+The demo **records nothing**, and that is a property of the build rather than
+of the copy — `AppViewModel` intercepts it at three points: activation never
+fetches a config, accepting never enrolls, and no tag is ever injected (nor
+is the demo re-validated, which would 404 and revoke it). `AppViewModelDemoTests`
+guards each one. Details: [plan §a5](docs/plan.md).
+
+```sh
+# QA: run the demo on a given site with no UI interaction (debug builds)
+adb shell am start -n one.moveo.studywrapper/.MainActivity \
+  -e MOVEO_AUTO_CODE MOVEODEMO -e MOVEO_DEMO_SITE example.com/pricing
+```
 
 ## Study instructions on the consent screen
 
@@ -195,8 +218,8 @@ the study, and the participant can finish it themselves.
 ```
 
 Release is hard-pinned to production (`pigeon.moveo.one` config API, the
-baked tag ingest endpoint): intent extras are ignored, there is no gear or
-settings screen, no event spy, no ingest redirect, and no cleartext config.
+baked tag ingest endpoint): intent extras are ignored, there is no settings
+screen, no event spy, no ingest redirect, and no cleartext config.
 
 Signing (docs/plan.md §h2): one keystore serves as the Play **upload** key
 (Play App Signing re-signs for distribution) and the AppGallery
@@ -230,8 +253,8 @@ keytool -printcert -jarfile app/build/outputs/bundle/playRelease/app-play-releas
 ```
 
 Then the release smoke test on a device/emulator: install the huawei APK
-(uninstall any debug build first — different signature), no gear icon, a
-bogus code round-trips to prod ("Code not recognized").
+(uninstall any debug build first — different signature), `MOVEO_API_BASE`
+is ignored, a bogus code round-trips to prod ("Code not recognized").
 
 **3. Google Play** — upload `app-play-release.aab` in Play Console:
 closed-testing track first, then promote to production ([plan §a4.2–a4.3](docs/plan.md):

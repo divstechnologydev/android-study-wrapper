@@ -2,6 +2,7 @@ package one.moveo.studycore
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -56,5 +57,58 @@ class CodesTests {
         assertEquals("4831", Codes.group("4831"))
         assertEquals("TEST-CODE-1234", Codes.group("TESTCODE1234"))
         assertEquals("6 chars: trailing 2-char group merges into the previous one", "ABCDEF", Codes.group("ABCDEF"))
+    }
+}
+
+/// The demo's site picker — what a participant types becomes `origins[0]`
+/// plus `flow.prepositionPath`, so anything this accepts must also pass the
+/// config validator's origin rule.
+class SiteInputTests {
+    @Test
+    fun bareHostname() {
+        assertEquals(SiteInput.Parsed("example.com", null), SiteInput.parse("example.com"))
+        assertEquals(SiteInput.Parsed("example.com", null), SiteInput.parse("  Example.COM  "))
+        assertEquals(SiteInput.Parsed("sainsburys.co.uk", null), SiteInput.parse("sainsburys.co.uk"))
+    }
+
+    @Test
+    fun schemeAndPath() {
+        assertEquals(SiteInput.Parsed("example.com", null), SiteInput.parse("https://example.com"))
+        assertEquals(SiteInput.Parsed("example.com", null), SiteInput.parse("http://example.com/"))
+        assertEquals(SiteInput.Parsed("example.com", "/pricing"), SiteInput.parse("example.com/pricing"))
+        assertEquals(
+            SiteInput.Parsed("shop.example.com", "/c/shoes?sort=new#top"),
+            SiteInput.parse("https://shop.example.com/c/shoes?sort=new#top"),
+        )
+    }
+
+    @Test
+    fun wwwIsDropped() {
+        // Origins match subdomains downward, so the bare domain covers www —
+        // the reverse is not true.
+        assertEquals(SiteInput.Parsed("example.com", null), SiteInput.parse("www.example.com"))
+        assertEquals(SiteInput.Parsed("example.com", "/x"), SiteInput.parse("https://www.example.com/x"))
+        assertEquals(SiteInput.Parsed("www.com", null), SiteInput.parse("www.com"))
+    }
+
+    @Test
+    fun rejected() {
+        assertNull(SiteInput.parse(""))
+        assertNull(SiteInput.parse("   "))
+        assertNull(SiteInput.parse("localhost"))
+        assertNull(SiteInput.parse("not a url"))
+        assertNull(SiteInput.parse("ftp://example.com"))
+        assertNull(SiteInput.parse("javascript:alert(1)"))
+        assertNull(SiteInput.parse("https://"))
+        assertNull(SiteInput.parse("exa_mple.com"))
+    }
+
+    @Test
+    fun everythingAcceptedIsAValidConfigOrigin() {
+        for (input in listOf("example.com", "https://www.example.com/pricing", "shop.example.co.uk/x?y=1")) {
+            val parsed = SiteInput.parse(input)
+            assertNotNull(input, parsed)
+            assertTrue("$input -> ${parsed!!.origin}", Origins.isValidOrigin(parsed.origin))
+        }
     }
 }

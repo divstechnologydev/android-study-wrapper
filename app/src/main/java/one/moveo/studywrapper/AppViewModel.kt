@@ -26,6 +26,7 @@ import one.moveo.studycore.FlowConstants
 import one.moveo.studycore.LeadUrl
 import one.moveo.studycore.Origins
 import one.moveo.studycore.ScriptBuilder
+import one.moveo.studycore.SiteInput
 import one.moveo.studycore.SessionIds
 import one.moveo.studycore.SetupLink
 import one.moveo.studycore.StudyConfig
@@ -141,6 +142,15 @@ class AppViewModel(
     /// Scripted-QA: URL to navigate the browser to after launch (debug only).
     var qaAutoNav: String? = null
 
+    /// Scripted-QA: site the demo runs on when it is started without the
+    /// picker (debug only; the iOS MOVEO_DEMO_SITE env var).
+    var qaDemoSite: String? = null
+
+    /// Scripted-QA / store-screenshot capture: opens one of the activation
+    /// screen's full-screen destinations on launch — "howitworks", "demo" or
+    /// "results" (debug only; the iOS MOVEO_AUTO_SHEET env var).
+    var qaAutoSheet: String? = null
+
     /// DEBUG explicit ingest-redirect override (the iOS `ingestOverride`).
     var ingestOverride: String? = null
 
@@ -225,6 +235,49 @@ class AppViewModel(
         return ResolvedInput(code, linked)
     }
 
+    /// The demo runs entirely on-device. Interception point 1 of 3:
+    /// activation never reaches the network. (2: `acceptConsentNow` never
+    /// enrolls. 3: `currentUserScriptSource` never injects the tag, and
+    /// `revalidateNow` never re-fetches.)
+    fun isDemoCode(code: String): Boolean = code == DemoStudy.CODE
+
+    /// Entry point for the demo site picker. Goes to the same consent screen
+    /// a real activation does — there is one demo path to reason about, and
+    /// typing the reserved code is the same thing on the default site.
+    fun startDemo(site: SiteInput.Parsed) {
+        val config = DemoStudy.config(site)
+        if (config == null) {
+            _phase.value = Phase.Failed(
+                title = "Check the website address",
+                message = "Enter a website address like example.com, or paste a full link to the page " +
+                    "the demo should start on.",
+            )
+            return
+        }
+        presentDemoConsent(config)
+    }
+
+    private fun presentDemoConsent(config: StudyConfig) {
+        _consentError.value = null
+        linkTransactionId = null
+        codeInput.value = DemoStudy.CODE
+        _browserPresented.value = false
+        _phase.value = Phase.Consent(
+            PendingActivation(
+                code = DemoStudy.CODE,
+                config = config,
+                replacingName = store.activeStudy?.let { active ->
+                    if (active.code == DemoStudy.CODE) null else active.config.study.name
+                },
+                // Never sent anywhere — the demo does not enroll — but the
+                // type requires one and a real-looking id keeps the demo on
+                // the same code path as a real activation.
+                enrollmentId = Enrollment.generateId(),
+                transactionId = null,
+            ),
+        )
+    }
+
     fun activate() {
         scope.launch { activateNow() }
     }
@@ -240,6 +293,18 @@ class AppViewModel(
             return
         }
         val code = input.code
+
+        // The reserved code runs the demo on its default site — the picker is
+        // the normal way in, this keeps codes and links consistent.
+        if (isDemoCode(code)) {
+            val config = DemoStudy.defaultConfig(qaDemoSite)
+            if (config != null) {
+                presentDemoConsent(config)
+                runAutoFlowIfRequested()
+                return
+            }
+        }
+
         _phase.value = Phase.Fetching
         when (val result = configService.fetchConfig(code = code)) {
             is ApiResult.Success -> {
@@ -261,19 +326,25 @@ class AppViewModel(
                     // only on accept, and Decline is the way out.
                     _consentError.value = null
                     _phase.value = Phase.Consent(pending)
-                    // Scripted QA (milestone smoke scripts, no UI interaction):
-                    //   MOVEO_AUTO_FLOW=enroll  — accept consent + enroll
-                    //   MOVEO_AUTO_FLOW=browser — …and open the study browser
-                    when (qaAutoFlow) {
-                        "enroll" -> acceptConsentNow()
-                        "browser" -> {
-                            acceptConsentNow()
-                            if (_activeStudy.value != null) openBrowser()
-                        }
-                    }
+                    runAutoFlowIfRequested()
                 }
             }
             is ApiResult.Failure -> _phase.value = failedPhase(result.error)
+        }
+    }
+
+    /// Scripted QA (milestone smoke scripts, no UI interaction), driven from
+    /// the consent screen whichever way it was reached — a real code or the
+    /// demo:
+    ///   MOVEO_AUTO_FLOW=enroll  — accept consent + enroll
+    ///   MOVEO_AUTO_FLOW=browser — …and open the study browser
+    private suspend fun runAutoFlowIfRequested() {
+        when (qaAutoFlow) {
+            "enroll" -> acceptConsentNow()
+            "browser" -> {
+                acceptConsentNow()
+                if (_activeStudy.value != null) openBrowser()
+            }
         }
     }
 
@@ -288,6 +359,25 @@ class AppViewModel(
     suspend fun acceptConsentNow() {
         val pending = (_phase.value as? Phase.Consent)?.pending ?: return
         if (_enrolling.value) return
+
+        // Interception point 2: the demo is not an enrollment. No participant
+        // id is read, no call is made, and no consent record is written —
+        // there is nothing to consent to when nothing is collected.
+        if (isDemoCode(pending.code)) {
+            store.activeStudy = ActiveStudy(
+                code = pending.code,
+                config = pending.config,
+                enrolledAt = now(),
+                enrollmentId = pending.enrollmentId,
+            )
+            store.endedStudy = null
+            _activeStudy.value = store.activeStudy
+            _endedStudy.value = null
+            codeInput.value = ""
+            _phase.value = Phase.Idle
+            return
+        }
+
         _enrolling.value = true
         _consentError.value = null
         try {
@@ -379,6 +469,10 @@ class AppViewModel(
         presentDueLeadOut() // crash recovery for a pending lead-out (M4)
 
         val study = store.activeStudy ?: return
+        // The demo has no server-side existence: re-validating it would 404
+        // and revoke it out from under the participant. It ends only when the
+        // participant finishes or leaves.
+        if (study.isDemo) return
         // A record whose lead-out was already shown but is still active can
         // only come from a build where the lead-out did not end the study —
         // the participant finished; complete it now.
@@ -467,6 +561,11 @@ class AppViewModel(
     /// study (no injection at all).
     fun currentUserScriptSource(): String? {
         val study = store.activeStudy ?: return null
+        // Interception point 3: the demo never injects the tag. This is what
+        // makes "nothing is recorded" a property of the build rather than a
+        // promise in the copy — with no tag in the page there is no
+        // collection and no transport.
+        if (study.isDemo) return null
         val tag = assetLoader("moveo-one.js") ?: return null
         val bootstrap = assetLoader("moveo-bootstrap.android.js") ?: return null
         val includeEventTarget =

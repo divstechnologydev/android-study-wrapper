@@ -28,8 +28,8 @@ android {
         applicationId = "one.moveo.studywrapper"
         minSdk = 26
         targetSdk = 36
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 3
+        versionName = "0.1.2"
     }
 
     // Store split (docs/plan.md §h1): flavors may differ ONLY in the

@@ -43,6 +43,7 @@ import one.moveo.studywrapper.AppViewModel
 import one.moveo.studywrapper.R
 import one.moveo.studycore.ActiveStudy
 import one.moveo.studycore.Codes
+import one.moveo.studywrapper.isDemo
 
 /// Root state while a study is active (← iOS StudyHomeView.swift): status +
 /// the entry point to the study browser + leave. Mirrors the extension popup
@@ -52,76 +53,121 @@ import one.moveo.studycore.Codes
 fun StudyHomeScreen(model: AppViewModel, study: ActiveStudy) {
     var confirmingLeave by remember { mutableStateOf(false) }
     var confirmingFinish by remember { mutableStateOf(false) }
+    // No demo entry point from here: a study is already running, so the only
+    // full-screen destinations are the explainer and (for a demo) the sample
+    // results.
+    var showHowItWorks by remember { mutableStateOf(false) }
+    var showResults by remember { mutableStateOf(false) }
+    val isDemo = study.isDemo
+
+    if (showHowItWorks) {
+        HowItWorksScreen(onDismiss = { showHowItWorks = false })
+        return
+    }
+    if (showResults) {
+        DemoResultsScreen(onDismiss = { showResults = false })
+        return
+    }
 
     Column(modifier = Modifier.fillMaxSize().background(Brand.bg)) {
-        HomeHeader(onLeaveRequested = { confirmingLeave = true })
-        StatusBar()
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .verticalScroll(rememberScrollState())
-                .padding(16.dp)
-                .padding(top = 4.dp),
-            verticalArrangement = Arrangement.spacedBy(18.dp),
-        ) {
-            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text(
-                    study.config.study.name,
-                    fontSize = 18.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = Brand.text,
-                )
-                Text(
-                    "Code ${Codes.group(study.code)}",
-                    fontSize = 12.sp,
-                    fontFamily = FontFamily.Monospace,
-                    color = Brand.textMuted,
-                )
-                study.enrolledAt?.let { enrolledAt ->
-                    Text(
-                        "Enrolled ${enrolledFormatter.format(enrolledAt)}",
-                        fontSize = 12.sp,
-                        color = Brand.textMuted,
+        HomeHeader(
+            onLeaveRequested = { confirmingLeave = true },
+            onHowItWorks = { showHowItWorks = true },
+        )
+        StatusBar(isDemo = isDemo)
+        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .verticalScroll(rememberScrollState())
+                    .readingColumn(regular = 720.dp)
+                    .padding(16.dp)
+                    .padding(top = 4.dp),
+                verticalArrangement = Arrangement.spacedBy(18.dp),
+            ) {
+                if (isDemo) {
+                    BrandNotice(
+                        text = "This is a demo. It works exactly like a real study, except that nothing is recorded and no data leaves your device. Finish it whenever you like.",
+                        background = Brand.infoBg,
+                        foreground = Brand.infoText,
                     )
                 }
-            }
 
-            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                BrandEyebrow("Tracked websites")
-                OriginChips(origins = study.config.tracking.origins)
-            }
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(
+                        study.config.study.name,
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = Brand.text,
+                    )
+                    // The demo has no invitation code to quote back and no
+                    // enrollment — showing either would invent facts.
+                    if (!isDemo) {
+                        Text(
+                            "Code ${Codes.group(study.code)}",
+                            fontSize = 12.sp,
+                            fontFamily = FontFamily.Monospace,
+                            color = Brand.textMuted,
+                        )
+                    }
+                    study.enrolledAt?.let { enrolledAt ->
+                        Text(
+                            "${if (isDemo) "Started" else "Enrolled"} ${enrolledFormatter.format(enrolledAt)}",
+                            fontSize = 12.sp,
+                            color = Brand.textMuted,
+                        )
+                    }
+                }
 
-            BrandPrimaryButton(
-                text = "Open study browser",
-                onClick = { model.openBrowser() },
-                modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
-            )
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    // "Tracked" would be a false statement about a site the
+                    // participant picked themselves.
+                    BrandEyebrow(if (isDemo) "Demo website" else "Tracked websites")
+                    OriginChips(origins = study.config.tracking.origins)
+                }
 
-            Text(
-                "Browse the study websites naturally — that's the whole task. When you're finished, tap Done in the browser to complete the study.",
-                fontSize = 13.sp,
-                lineHeight = 19.sp,
-                color = Brand.textSecondary,
-            )
+                BrandPrimaryButton(
+                    text = "Open study browser",
+                    onClick = { model.openBrowser() },
+                    modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                )
 
-            // Extension popup `.finish` block: hairline, hint, button.
-            Column(
-                modifier = Modifier.padding(top = 6.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                HorizontalDivider(color = Brand.border, thickness = 1.dp)
                 Text(
-                    "Done with the study tasks? Tap here to finish the study.",
-                    modifier = Modifier.padding(top = 6.dp),
-                    fontSize = 12.5.sp,
-                    lineHeight = 18.sp,
+                    "Browse the study websites naturally — that's the whole task. When you're finished, tap Done in the browser to complete the study.",
+                    fontSize = 13.sp,
+                    lineHeight = 19.sp,
                     color = Brand.textSecondary,
                 )
-                BrandGhostButton(
-                    text = "Finish study",
-                    onClick = { confirmingFinish = true },
-                    modifier = Modifier.fillMaxWidth(),
-                )
+
+                // Reachable without finishing first: the results are the part a
+                // prospective customer came to see.
+                if (isDemo) {
+                    BrandGhostButton(
+                        text = "See sample results",
+                        onClick = { showResults = true },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+
+                // Extension popup `.finish` block: hairline, hint, button.
+                Column(
+                    modifier = Modifier.padding(top = 6.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    HorizontalDivider(color = Brand.border, thickness = 1.dp)
+                    Text(
+                        "Done with the study tasks? Tap here to finish the study.",
+                        modifier = Modifier.padding(top = 6.dp),
+                        fontSize = 12.5.sp,
+                        lineHeight = 18.sp,
+                        color = Brand.textSecondary,
+                    )
+                    BrandGhostButton(
+                        text = "Finish study",
+                        onClick = { confirmingFinish = true },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
             }
         }
     }
@@ -164,43 +210,55 @@ fun StudyHomeScreen(model: AppViewModel, study: ActiveStudy) {
 
 /// Extension popup header: wordmark left, study menu right.
 @Composable
-private fun HomeHeader(onLeaveRequested: () -> Unit) {
+private fun HomeHeader(onLeaveRequested: () -> Unit, onHowItWorks: () -> Unit) {
     var menuOpen by remember { mutableStateOf(false) }
     Column {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .background(Brand.bgElevated)
-                .padding(horizontal = 16.dp)
-                .padding(top = 14.dp, bottom = 11.dp),
-            verticalAlignment = Alignment.CenterVertically,
+        Box(
+            modifier = Modifier.fillMaxWidth().background(Brand.bgElevated),
+            contentAlignment = Alignment.Center,
         ) {
-            Image(
-                painter = painterResource(R.drawable.logo_wordmark),
-                contentDescription = "Moveo One",
-                modifier = Modifier.height(17.dp),
-            )
-            Spacer(Modifier.weight(1f))
-            Box {
-                IconButton(onClick = { menuOpen = true }, modifier = Modifier.size(32.dp)) {
-                    Icon(
-                        Icons.Outlined.MoreVert,
-                        contentDescription = "Study menu",
-                        tint = Brand.textSecondary,
-                    )
-                }
-                DropdownMenu(
-                    expanded = menuOpen,
-                    onDismissRequest = { menuOpen = false },
-                    containerColor = Brand.bgElevated,
-                ) {
-                    DropdownMenuItem(
-                        text = { Text("Leave study", color = Brand.dangerSolid) },
-                        onClick = {
-                            menuOpen = false
-                            onLeaveRequested()
-                        },
-                    )
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .readingColumn(regular = 720.dp)
+                    .padding(horizontal = 16.dp)
+                    .padding(top = 14.dp, bottom = 11.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Image(
+                    painter = painterResource(R.drawable.logo_wordmark),
+                    contentDescription = "Moveo One",
+                    modifier = Modifier.height(17.dp),
+                )
+                Spacer(Modifier.weight(1f))
+                Box {
+                    IconButton(onClick = { menuOpen = true }, modifier = Modifier.size(32.dp)) {
+                        Icon(
+                            Icons.Outlined.MoreVert,
+                            contentDescription = "Study menu",
+                            tint = Brand.textSecondary,
+                        )
+                    }
+                    DropdownMenu(
+                        expanded = menuOpen,
+                        onDismissRequest = { menuOpen = false },
+                        containerColor = Brand.bgElevated,
+                    ) {
+                        DropdownMenuItem(
+                            text = { Text("How it works", color = Brand.text) },
+                            onClick = {
+                                menuOpen = false
+                                onHowItWorks()
+                            },
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Leave study", color = Brand.dangerSolid) },
+                            onClick = {
+                                menuOpen = false
+                                onLeaveRequested()
+                            },
+                        )
+                    }
                 }
             }
         }
@@ -209,22 +267,33 @@ private fun HomeHeader(onLeaveRequested: () -> Unit) {
 }
 
 @Composable
-private fun StatusBar() {
+private fun StatusBar(isDemo: Boolean) {
     Column {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .background(Brand.bgChrome)
-                .padding(horizontal = 16.dp, vertical = 7.dp),
-            horizontalArrangement = Arrangement.spacedBy(7.dp),
-            verticalAlignment = Alignment.CenterVertically,
+        Box(
+            modifier = Modifier.fillMaxWidth().background(Brand.bgChrome),
+            contentAlignment = Alignment.Center,
         ) {
-            StatusDot(mode = StatusDotMode.ACTIVE)
-            Text(
-                "Tracking active on the study websites",
-                fontSize = 12.5.sp,
-                color = Brand.textSecondary,
-            )
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .readingColumn(regular = 720.dp)
+                    .padding(horizontal = 16.dp, vertical = 7.dp),
+                horizontalArrangement = Arrangement.spacedBy(7.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                // The live dot means one thing only (orange = tracking is on), so
+                // the demo must never borrow it — neutral, and not blinking.
+                StatusDot(mode = if (isDemo) StatusDotMode.NEUTRAL else StatusDotMode.ACTIVE)
+                Text(
+                    if (isDemo) {
+                        "Demo mode — nothing is being recorded"
+                    } else {
+                        "Tracking active on the study websites"
+                    },
+                    fontSize = 12.5.sp,
+                    color = Brand.textSecondary,
+                )
+            }
         }
         HorizontalDivider(color = Brand.border, thickness = 1.dp)
     }

@@ -22,6 +22,15 @@ object BackendConstants {
     const val PRIVACY_POLICY_URL = "https://www.moveo.one/privacy"
 }
 
+/// Participant support surfaces, linked from the in-app explainer. The same
+/// URL goes in the store listings' support field, and the page must be live
+/// before submission — both review teams open it.
+object SupportConstants {
+    const val SUPPORT_URL = "https://www.moveo.one/support/user-research"
+    const val SUPPORT_EMAIL = "support@moveo.one"
+    const val SUPPORT_MAILTO = "mailto:$SUPPORT_EMAIL?subject=Moveo%20One%20User%20Research%20app"
+}
+
 /// Tag tracking-session ids as the bridge reports them. The id is
 /// page-side input (the injected tag runs in the study site's page), so it
 /// is validated against the extension's exact shape rule before anything is

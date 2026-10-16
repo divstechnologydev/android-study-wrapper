@@ -98,7 +98,14 @@ fun ConsentScreen(model: AppViewModel, pending: AppViewModel.PendingActivation) 
                             modifier = Modifier.size(20.dp), color = fg, strokeWidth = 2.dp,
                         )
                     } else {
-                        Text("Accept & continue", fontSize = 15.sp, fontWeight = FontWeight.Medium, color = fg)
+                        // "Accept" would misdescribe the demo — there is no
+                        // enrollment and nothing to consent to.
+                        Text(
+                            if (model.isDemoCode(pending.code)) "Start demo" else "Accept & continue",
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = fg,
+                        )
                     }
                 }
             }
@@ -125,6 +132,18 @@ private fun ConsentCard(
             fontWeight = FontWeight.SemiBold,
             color = Brand.text,
         )
+
+        // Demo-only, and therefore outside the consent wording proper: the
+        // demo never enrolls, so no TEXT_VERSION bump (see the type doc).
+        // Everything a real participant sees below is unchanged.
+        if (model.isDemoCode(pending.code)) {
+            BrandNotice(
+                text = "This is a demo. The rest of this page is the real consent screen, word for word — but in the demo nothing is recorded, nothing is sent anywhere, and you are not enrolled in anything.",
+                background = Brand.infoBg,
+                foreground = Brand.infoText,
+                modifier = Modifier.padding(top = 10.dp),
+            )
+        }
 
         pending.replacingName?.let { replacing ->
             BrandNotice(

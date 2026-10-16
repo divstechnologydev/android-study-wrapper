@@ -206,8 +206,8 @@ this app only depends on it. The "Open in app" button must forward
 ### a1.4 Link-first activation, transaction id, client enrollment id
 
 Port of the iOS `transactions-track` branch / extension `enrollment-id`
-branch (2026-08-27): the setup link becomes the only UI entry (manual code
-field removed), links may carry the panel provider's `?transaction_id=`
+branch (2026-08-27): the setup link becomes the steered UI entry (the manual
+code field was removed here and restored on 2026-09-30, see §a5), links may carry the panel provider's `?transaction_id=`
 (validated `^[A-Za-z0-9_-]{1,256}$`, sent as `transactionId` in the enroll
 body, echoed as `transaction_id` on the **lead-out** URL only), and the app
 mints `enrollmentId` (`e_<uuid>`) once per activation before the first
@@ -351,9 +351,12 @@ bridge object doesn't even exist off-study. Message handling ports
 The Android analogue of the iOS `#if DEBUG` invariant — **release builds
 must not contain the QA surface at all**, hence `src/debug` source sets, not
 runtime flags:
-- Debug settings screen (gear icon): API-base override (mock/dev/prod),
-  effective base display, participant id, event-spy toggle + capture
-  export/clear, tag-health ping, vendored-tag provenance.
+- Debug settings screen: API-base override (mock/dev/prod), effective base
+  display, participant id, event-spy toggle + capture export/clear,
+  tag-health ping, vendored-tag provenance. Its gear entry point was removed
+  on 2026-10-01 with the iOS nav-bar gear (a5): the QA surface is driven by
+  intent extras only, so nothing of it can appear on screen. The screen
+  itself stays in the debug source set, unreferenced.
 - Scripted QA hooks: intent extras replace the iOS `MOVEO_*` env vars —
   `adb shell am start … -e MOVEO_API_BASE … -e MOVEO_AUTO_CODE … -e
   MOVEO_AUTO_FLOW enroll|browser -e MOVEO_AUTO_NAV <url>` (a link already
@@ -493,10 +496,11 @@ code.
 - Store listing states plainly that this is a research-participant app that
   tracks interactions on study websites after consent; reviewer notes
   include a working test code against prod (Play reviewers will open the
-  app).
+  app) — and, since a5.1, the demo: a reviewer with no code taps **Try a
+  demo study** and sees the entire participant flow.
 - Release hygiene: R8 enabled, no debug source set in the bundle
-  (verify: no gear icon, config GETs hit `pigeon.moveo.one` only), Play App
-  Signing, versionCode scheme.
+  (verify: `MOVEO_*` extras ignored, config GETs hit `pigeon.moveo.one`
+  only), Play App Signing, versionCode scheme.
 
 ### a4.3 Closed-testing pilot (M6/M7)
 
@@ -514,6 +518,62 @@ a3.1 parity diff, then release. Never edit `assets/moveo-one.js`.
 
 **Exit criteria:** production release on Google Play; pilot study data
 verified comparable with desktop/iOS cohorts.
+
+---
+
+## Phase a5 — no-invitation surfaces (demo + explainer)
+
+Port of the iOS working set of 2026-09-30 (the changes App Review prompted),
+so the two apps match screen for screen.
+
+### a5.1 Demo study
+
+A complete study anyone can run with no invitation: the real flow (consent →
+instructions → study browser → finish) against a public website the
+participant picks, with one difference — **nothing is recorded**. The promise
+is structural, not copy: `DemoStudy` is intercepted at three points in
+`AppViewModel` (`AppViewModelDemoTests` is the guard for each).
+
+| # | Point | Effect |
+|---|---|---|
+| 1 | `activateNow()` — reserved code `MOVEODEMO`, or `startDemo(site)` from the picker | consent is reached without a config fetch |
+| 2 | `acceptConsentNow()` | no `/enroll`, no participant id read, no consent record |
+| 3 | `currentUserScriptSource()` / `revalidateNow()` | no tag injected (no collection, no transport) and no re-validation — re-validating a study the backend never issued would 404 and revoke it |
+
+The demo config is built through `ConfigValidator` like any other, so a typed
+hostname can never reach the browser unvalidated, and the study stays scoped
+to that one origin (off-origin links leave for the system browser, as in a
+real study). `SiteInput` (in `:studycore`, shared origin rule with the
+validator) turns what a participant types into `origins[0]` +
+`flow.prepositionPath`. Demo runs carry no lead-in/lead-out and no target
+action: Finish ends them.
+
+Demo state is the reserved code alone (`ActiveStudy.isDemo`) — no new
+persisted field, so records from earlier builds keep decoding.
+
+### a5.2 How it works, sample results
+
+- **How it works** — the standing explainer, reachable with no invitation, no
+  study and no network (activation card, and the study menu). Mirrors the
+  public support page (`SupportConstants.SUPPORT_URL`). Not consent wording:
+  editing it does **not** bump `ConsentConstants.TEXT_VERSION`.
+- **Sample results** — what a study produces, shown from the demo's home and
+  completion screens. Every number is illustrative, said on the screen, the
+  chart and the metric detail, because a screenshot travels without context.
+
+### a5.3 Large-screen layout
+
+`ui/AdaptiveLayout.kt` is the iOS `AdaptiveLayout.swift` analogue: two
+columns and a wider reading measure above a 720dp window width, the phone's
+single column below it. Android has no size class, so the window width is the
+measure — it tracks split-screen and folding the way `horizontalSizeClass`
+tracks Split View. R13 (tablets not a v1 target) is unchanged: this is so the
+new screens are not a blown-up phone layout where the OS ignores the portrait
+lock.
+
+**Exit criteria:** the demo runs end to end with zero network calls and no
+injected script; both store review teams can see the whole flow without a
+live study code.
 
 ---
 
@@ -556,7 +616,7 @@ code/build work; h3 is store admin (slow — start early); h4 rides with a1.
 - Consequence: the two store builds carry different final signatures — a
   device can never cross-update between stores (accepted).
 - Exit: both artifacts build signed; huaweiRelease passes the a4.2 smoke
-  test (no gear icon, config GETs hit prod only).
+  test (intent extras ignored, config GETs hit prod only).
 
 ### h3 AppGallery Connect listing
 

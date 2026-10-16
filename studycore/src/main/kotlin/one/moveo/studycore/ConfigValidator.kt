@@ -404,12 +404,9 @@ object ConfigValidator {
 
     private fun isHttpsUrl(v: JsonElement?): Boolean = asString(v)?.startsWith("https://") == true
 
-    /// Bare lowercase hostname, ≥2 labels — the extension's ORIGIN_RE.
-    /// `Regex.matches` is whole-string (the `\A`/`\z` anchoring), so a
-    /// trailing newline can't sneak past `$`.
-    private val originRegex = Regex("[a-z0-9]([a-z0-9-]*[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+")
-
-    private fun isValidOrigin(s: String): Boolean = originRegex.matches(s)
+    /// Schema §5 origin shape — the one definition, shared with the demo's
+    /// site picker (see `Origins.isValidOrigin`).
+    private fun isValidOrigin(s: String): Boolean = Origins.isValidOrigin(s)
 
     /// `JSON.stringify`-style rendering for error messages (kotlinx renders
     /// string primitives quoted+escaped already).

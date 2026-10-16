@@ -57,6 +57,7 @@ class InMemoryParticipantIdStore(private var id: String? = null) : ParticipantId
 ///                      endedStudy      — EndedStudy
 ///                      ownTagHosts     — {hostname: detectedAt} (yield map)
 ///                      apiBaseOverride — String (DEBUG/mock only)
+///                      demoSite        — String (last site the demo ran on)
 class StudyStore(
     private val store: KeyValueStore,
     private val participantIdStore: ParticipantIdStore,
@@ -67,6 +68,7 @@ class StudyStore(
         const val ENDED_STUDY = "endedStudy"
         const val OWN_TAG_HOSTS = "ownTagHosts"
         const val API_BASE_OVERRIDE = "apiBaseOverride"
+        const val DEMO_SITE = "demoSite"
     }
 
     private val ownTagHostsSerializer = MapSerializer(String.serializer(), InstantIso8601Serializer)
@@ -96,6 +98,13 @@ class StudyStore(
     var apiBaseOverride: String?
         get() = store.getString(Key.API_BASE_OVERRIDE)
         set(value) = store.putString(Key.API_BASE_OVERRIDE, value)
+
+    /// Last website the demo was pointed at, so a second run doesn't mean
+    /// retyping it (the iOS `@AppStorage("demoSite")`). Not study state — it
+    /// survives leaving a study and is cleared by nothing but a reinstall.
+    var demoSite: String?
+        get() = store.getString(Key.DEMO_SITE)
+        set(value) = store.putString(Key.DEMO_SITE, value)
 
     fun participantId(): String = participantIdStore.getOrCreate()
 
