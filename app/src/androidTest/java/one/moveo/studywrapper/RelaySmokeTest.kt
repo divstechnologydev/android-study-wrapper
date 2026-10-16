@@ -3,10 +3,14 @@ package one.moveo.studywrapper
 import android.annotation.SuppressLint
 import android.os.Handler
 import android.os.Looper
+import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
 import android.webkit.WebView
+import android.webkit.WebViewClient
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.webkit.WebViewCompat
+import java.io.ByteArrayInputStream
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import kotlinx.serialization.json.Json
@@ -22,12 +26,17 @@ import org.junit.runner.RunWith
 
 /// Instrumented smoke test for the CSP relay — the Android analogue of the
 /// iOS `Scripts/relay-smoke.swift` (an offscreen WKWebView). A real Android
-/// System WebView loads a page with `connect-src 'none'`, with the production
-/// injection (ScriptBuilder: payload → guard → vendored tag → bootstrap) and
-/// a `moveoFetch` listener standing in for the app. Passes when the direct
-/// page-world fetch is refused by the CSP while the tag's events and IP
-/// lookup still arrive through the relay, the flush bridge resolves, and the
-/// bridge posts (initialized / session / target) keep working.
+/// System WebView navigates to `https://shop.example.com/products/1`, served
+/// from `shouldInterceptRequest` with a `Content-Security-Policy:
+/// connect-src 'none'` header (a `loadDataWithBaseURL` document does not get
+/// its CSP enforced, and a real site's policy is a header anyway), with the
+/// production injection (ScriptBuilder: payload → guard → vendored tag →
+/// bootstrap) and a `moveoFetch` listener standing in for the app. Nothing
+/// else leaves the device: every other request is answered 404 by the
+/// interceptor. Passes when the direct page-world fetch is refused by the
+/// CSP while the tag's events and IP lookup still arrive through the relay,
+/// the flush bridge resolves, and the bridge posts (initialized / session /
+/// target) keep working.
 ///
 ///   scripts/relay-smoke.sh     (= ./gradlew :app:connectedPlayDebugAndroidTest
 ///                               filtered to this class; needs a device/AVD)
@@ -43,13 +52,32 @@ class RelaySmokeTest {
     private val probes = java.util.Collections.synchronizedMap(mutableMapOf<String, String>())
     private val probeArrived = java.util.Collections.synchronizedMap(mutableMapOf<String, CountDownLatch>())
 
+    private val pageUrl = "https://shop.example.com/products/1"
+    private val csp = "default-src 'self' 'unsafe-inline'; connect-src 'none'"
     private val html = """
         <!doctype html><html><head>
-        <meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline'; connect-src 'none'">
+        <meta http-equiv="Content-Security-Policy" content="$csp">
         <title>CSP strict</title></head>
         <body><h1>Strict CSP page</h1><button id="buy">Buy now</button>
         <button id="plus" aria-label="add 1 Bananas"><svg width="10" height="10"></svg></button></body></html>
     """.trimIndent()
+
+    /// Serves the strict page for the study URL and refuses everything else,
+    /// so the test is hermetic — a request that reaches here was NOT blocked
+    /// by the CSP (the renderer enforces the policy before the network side).
+    private inner class StrictSite : WebViewClient() {
+        override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse {
+            return if (request.url.toString() == pageUrl) {
+                WebResourceResponse(
+                    "text/html", "utf-8", 200, "OK",
+                    mapOf("Content-Security-Policy" to csp),
+                    html.byteInputStream(),
+                )
+            } else {
+                WebResourceResponse("text/plain", "utf-8", 404, "Not Found", emptyMap(), ByteArrayInputStream(ByteArray(0)))
+            }
+        }
+    }
 
     private fun probe(name: String): CountDownLatch = probeArrived.getOrPut(name) { CountDownLatch(1) }
 
@@ -109,7 +137,8 @@ class RelaySmokeTest {
                     replyProxy.postMessage(one.moveo.studycore.TagRelay.Reply(ok = true, status = 200, body = body).toMessage(id))
                 }, 50)
             }
-            webView.loadDataWithBaseURL("https://shop.example.com/products/1", html, "text/html", "utf-8", null)
+            webView.webViewClient = StrictSite()
+            webView.loadUrl(pageUrl)
         }
 
         /// Runs page-world JS whose (async) result is posted back as a
@@ -137,7 +166,7 @@ class RelaySmokeTest {
         // Let the tag initialise (IP lookup + start_session go out at init).
         Thread.sleep(2_500)
 
-        val direct = runProbe("direct", "fetch('https://api.moveo.one/api/my-ip').then(function () { return 'reached'; }, function (e) { return 'blocked: ' + e.message; })")
+        val direct = runProbe("direct", "fetch('https://api.moveo.one/api/my-ip').then(function (r) { return 'reached ' + r.status; }, function (e) { return 'blocked: ' + e.message; })")
         assertTrue("direct page-world fetch is refused by the page CSP: $direct", direct.startsWith("blocked"))
 
         runProbe("click", "(document.getElementById('buy').click(), document.getElementById('plus').click(), typeof window.__moveoFlush)")
