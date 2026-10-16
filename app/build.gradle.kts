@@ -30,6 +30,8 @@ android {
         targetSdk = 36
         versionCode = 3
         versionName = "0.1.2"
+        // Instrumented tests: the CSP-relay smoke test (scripts/relay-smoke.sh).
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
     // Store split (docs/plan.md §h1): flavors may differ ONLY in the
@@ -113,4 +115,9 @@ dependencies {
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)
     testImplementation(libs.okhttp.mockwebserver)
+
+    // Instrumented smoke test for the CSP relay on a real WebView
+    // (app/src/androidTest; `scripts/relay-smoke.sh`).
+    androidTestImplementation(libs.androidx.test.ext.junit)
+    androidTestImplementation(libs.androidx.test.runner)
 }

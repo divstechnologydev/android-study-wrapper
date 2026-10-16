@@ -60,18 +60,23 @@ object DebugHooks {
     fun installEventSpyBridge(webView: android.webkit.WebView, rules: Set<String>) =
         EventSpy.installBridge(webView, rules)
 
-    /// DEBUG ingest redirect (§a2.7): rewrites the tag's fetch URLs so dev
-    /// studies' events reach the dev ingestion host. Where events should be
-    /// rerouted: an explicit override wins; otherwise a config that declares
-    /// a different endpoint than the tag's baked one (dev studies) is
-    /// honored automatically. Null = no redirect (prod behavior). The
-    /// release variant of this object always returns null AND the template
-    /// asset only exists in the debug source set.
+    /// CSP relay parity capture: relayed event batches never touch
+    /// `window.fetch`, so the spy's page-world wrapper cannot see them — the
+    /// model hands them here instead (same JSONL capture format, same
+    /// `moveo-events` log feed). The relay's own on/off state is the spy's.
+    /// Release wires null, so the model carries no observer code there.
+    val relayedEventsObserver: ((url: String, host: String, body: String) -> Unit) =
+        { url, host, body -> EventSpy.observeRelayedPost(url = url, host = host, body = body) }
+
+    /// DEBUG ingest redirect (§a2.7): rewrites the tag's page-world fetch
+    /// URLs so dev studies' events reach the dev ingestion host. The target
+    /// is the model's `effectiveIngestRedirect` (one definition shared with
+    /// the native relay, which reroutes the relayed requests itself). Null =
+    /// no redirect (prod behavior). The release variant of this object
+    /// always returns null AND the template asset only exists in the debug
+    /// source set.
     fun ingestRedirectScript(model: AppViewModel): String? {
-        val target = model.ingestOverride?.takeIf { it.isNotEmpty() }
-            ?: model.store.activeStudy?.config?.tracking?.apiUrl
-                ?.takeIf { it != one.moveo.studycore.generated.TagEndpoint.apiUrl }
-            ?: return null
+        val target = model.effectiveIngestRedirect ?: return null
         val template = try {
             appContext?.assets?.open("moveo-ingest-redirect.android.js")
                 ?.bufferedReader()?.use { it.readText() }

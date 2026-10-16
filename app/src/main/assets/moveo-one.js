@@ -3,6 +3,7 @@
   if (window.MoveoOne) return;
 
   const API_URL = "https://api.moveo.one/api/analytic/event/tag";
+  const IP_LOOKUP_URL = "https://api.moveo.one/api/my-ip";
   const DOLPHIN_URL = "{{DOLPHIN_URL}}";
   // Builds that don't use the prediction service (e.g. the Chrome extension)
   // leave the DOLPHIN_URL placeholder unsubstituted. An unsubstituted value is
@@ -10,8 +11,28 @@
   // server and leak the token in the Authorization header — every
   // prediction-service network path must be gated on this flag.
   const DOLPHIN_ENABLED = /^https?:\/\//.test(DOLPHIN_URL);
-  const LIB_VERSION = "1.0.22"; // Constant library version - cannot be changed by client
-  // *** this version is changed, we added sg rules config which does not exist in 1.0.22 ver of tag
+  // Constant library version - cannot be changed by client. Reported as
+  // meta.libVersion on every event.
+  //
+  // *** EXTENSION BUILD — NOT the tag customers load from the CDN. ***
+  // This copy forked from the published 1.0.22 and has since diverged; the
+  // "-ext" suffix keeps the two apart in event data. Differences from the
+  // customer tag:
+  //   - semanticGroupRules / additionalTrackedElements init options
+  //     (config-schema.md §3.1, §3.2)
+  //   - DOLPHIN_ENABLED guard: prediction-service paths are compiled out when
+  //     the DOLPHIN_URL placeholder is left unsubstituted (see above)
+  //   - `transport` init option + sendRequest seam: the extension relays the
+  //     tag's network calls through its background to survive a host page's
+  //     Content-Security-Policy (extension/src/tag-relay.js)
+  //   - click listener registered in the CAPTURE phase (see setupClickTracking)
+  //     so the semantic group is resolved before a framework re-render can
+  //     detach the clicked element
+  //   - icon-only buttons/links fall back to their aria-label/title (then a
+  //     contained image's alt) for the click/hover value (getElementFullText),
+  //     matching the impression path
+  // Bump the base when syncing with a newer published tag; keep the suffix.
+  const LIB_VERSION = "1.0.22-ext";
   const LOGGING_ENABLED = false; // Enable/disable console logging
 
   const REDACTED_VALUE = "[REDACTED]";
@@ -35,7 +56,8 @@
   // all non-empty sources with "_". Structural sanitation happens here at
   // init; selector validity is only checkable against a live DOM, so it is
   // enforced at use time (try/catch in resolveSemanticGroupFromRules).
-  const SG_RULES_MAX_RULES = 20;
+  // No cap on the number of rules: a site with several markups per concept
+  // needs one rule per markup. Per-rule limits below still apply.
   const SG_RULES_MAX_SOURCES = 5;
   const SG_RULES_MAX_SELECTOR_LEN = 250;
   const SG_RULES_MAX_ATTR_LEN = 100;
@@ -48,7 +70,6 @@
     if (!Array.isArray(raw)) return [];
     const out = [];
     for (const entry of raw) {
-      if (out.length >= SG_RULES_MAX_RULES) break;
       if (entry === null || typeof entry !== "object" || Array.isArray(entry))
         continue;
       const container =
@@ -92,7 +113,8 @@
   // in the data. Purely additive: existing tracked elements are unaffected.
   // Structural sanitation happens here; selector syntax needs a live DOM,
   // so it is enforced at compile time (compileForcedTrackSelector).
-  const TRACK_SELECTORS_MAX_RULES = 20;
+  // No cap on the number of entries (same reasoning as the sg rules); the
+  // per-entry limits below still apply.
   const TRACK_SELECTORS_MAX_SELECTOR_LEN = 250;
   const TRACK_SELECTORS_MAX_TYPE_LEN = 50;
 
@@ -100,7 +122,6 @@
     if (!Array.isArray(raw)) return [];
     const out = [];
     for (const entry of raw) {
-      if (out.length >= TRACK_SELECTORS_MAX_RULES) break;
       if (entry === null || typeof entry !== "object" || Array.isArray(entry))
         continue;
       const selector =
@@ -151,6 +172,7 @@
       this.semanticGroupRules = []; // sanitized in init(); empty ⇒ heuristic sg only
       this.additionalTrackedElements = []; // sanitized in init(); selectors forced into tracking
       this.forcedTrackSelector = null; // comma-joined valid selectors; null ⇒ feature off
+      this.transport = null; // optional network seam, set in init(); null ⇒ fetch (see sendRequest)
 
       // Use persistent session ID across page loads
       this.sessionId = this.getOrCreateSessionId();
@@ -857,13 +879,46 @@
       this.sendEventImmediate(event);
     }
 
+    // Network seam for every request the tag makes to the Moveo API: the
+    // batch flush, the immediate and unload sends, and the IP lookup. By
+    // default it is a plain fetch. A host that cannot reach the API from the
+    // page — e.g. a browser extension injecting the tag into a site whose
+    // Content-Security-Policy connect-src excludes api.moveo.one — passes
+    // `options.transport` to init() instead:
+    //   transport({ kind, url, method, headers, body, keepalive })
+    //     → Promise<{ ok: boolean, status: number, body: string }>
+    // `kind` is "events" or "ip"; the transport may route by it and ignore
+    // the rest. Rejections surface to the caller exactly like a failed
+    // fetch, so every call site below already handles them.
+    sendRequest(kind, url, init) {
+      if (typeof this.transport === "function") {
+        // Resolve-then-call so a transport that throws synchronously rejects
+        // instead of unwinding into the tag's event pipeline.
+        return Promise.resolve().then(() =>
+          this.transport({
+            kind,
+            url,
+            method: init.method || "GET",
+            headers: init.headers || {},
+            body: init.body,
+            keepalive: !!init.keepalive,
+          }),
+        );
+      }
+      return fetch(url, init).then(async (response) => ({
+        ok: response.ok,
+        status: response.status,
+        body: await response.text(),
+      }));
+    }
+
     // Send single event immediately using optimized approach for page unload scenarios
     sendEventImmediate(event) {
       const data = JSON.stringify({ events: [event] });
 
       // For outbound links and page unloads, we need maximum reliability
       // Use fetch with keepalive and additional optimizations
-      fetch(API_URL, {
+      this.sendRequest("events", API_URL, {
         method: "POST",
         headers: {
           Authorization: this.token,
@@ -990,8 +1045,8 @@
     }
 
     enrichWithIpAddress() {
-      return fetch("https://api.moveo.one/api/my-ip")
-        .then((response) => response.json())
+      return this.sendRequest("ip", IP_LOOKUP_URL, { method: "GET" })
+        .then((response) => JSON.parse(response.body))
         .then((data) => ({
           // IP address from your own endpoint
           ipAddress: data.ip || "Unknown",
@@ -1644,7 +1699,20 @@
         if (interactiveTags.includes(element.tagName)) {
           let text = element.textContent || element.innerText || "";
           text = text.trim().replace(/\s+/g, " ");
-          return text;
+          if (text) return text;
+          // Icon-only controls (an SVG and no text — e.g. a quantity "+"/"-"
+          // button) have an accessible name instead; use it so click/hover
+          // carry the same value the impression path already reports
+          // (computeImpressionDisplayValue falls back to aria-label too).
+          // Image-only links (a product thumbnail) name themselves by the
+          // image's alt, as a screen reader would.
+          let accessibleName =
+            element.getAttribute("aria-label") || element.getAttribute("title") || "";
+          if (!accessibleName && typeof element.querySelector === "function") {
+            const img = element.querySelector("img[alt]");
+            if (img) accessibleName = img.getAttribute("alt") || "";
+          }
+          return accessibleName.trim().replace(/\s+/g, " ");
         }
 
         // For text container elements, get all text content including children
@@ -2491,7 +2559,7 @@
           const dataToSend = [...this.buffer];
           this.buffer = [];
           const data = JSON.stringify({ events: dataToSend });
-          fetch(API_URL, {
+          this.sendRequest("events", API_URL, {
             method: "POST",
             headers: {
               Authorization: this.token,
@@ -2518,7 +2586,7 @@
           const dataToSend = [...this.buffer];
           this.buffer = [];
           const data = JSON.stringify({ events: dataToSend });
-          fetch(API_URL, {
+          this.sendRequest("events", API_URL, {
             method: "POST",
             headers: {
               Authorization: this.token,
@@ -2700,7 +2768,7 @@
         });
       }
 
-      fetch(API_URL, {
+      this.sendRequest("events", API_URL, {
         method: "POST",
         headers: {
           Authorization: this.token,
@@ -2865,10 +2933,21 @@
         }
       };
 
-      // Single document-level listener: clicks bubble to document, so dynamically
-      // added content (e.g. Vue/React) is tracked without attaching per-node listeners.
-      // Attaching handleClick to every new node caused duplicate events (one per ancestor).
-      document.addEventListener("click", handleClick);
+      // Single document-level listener, so dynamically added content (e.g.
+      // Vue/React) is tracked without attaching per-node listeners. Attaching
+      // handleClick to every new node caused duplicate events (one per ancestor).
+      //
+      // CAPTURE phase, deliberately. A framework's own click handler runs
+      // before a bubbling document listener and may re-render synchronously —
+      // e.g. an "Add" button swapped for a quantity stepper (React 18 flushes
+      // discrete events synchronously). By bubble time the clicked element is
+      // detached, so closest()/parentElement walks find no container and the
+      // semantic group degrades to "global" while the same element's appear/
+      // hover events carry the right sg. Capture runs before any page handler,
+      // so the DOM is inspected exactly as the user saw it. Ordering with the
+      // tag's other click listeners does not matter: download/outbound links
+      // are excluded here by href, not by a flag they set.
+      document.addEventListener("click", handleClick, true);
 
       // NOTE: The MutationObserver below is intentionally disabled.
       // It attached handleClick to every newly added node AND all its descendants,
@@ -3895,6 +3974,11 @@
       );
       instance.forcedTrackSelector = instance.compileForcedTrackSelector();
 
+      // Optional network seam (see sendRequest). Anything but a function
+      // leaves the default fetch path in place.
+      instance.transport =
+        typeof options.transport === "function" ? options.transport : null;
+
       // Define allowed meta fields (libVersion is automatically included and protected)
       const allowedMetaFields = ["appVersion", "calculateLatency"];
 
@@ -3906,7 +3990,8 @@
           key === "userDataKeys" ||
           key === "exclude_detailed_tracking" ||
           key === "semanticGroupRules" ||
-          key === "additionalTrackedElements"
+          key === "additionalTrackedElements" ||
+          key === "transport"
         )
           return; // Already applied above
         if (allowedMetaFields.includes(key)) {

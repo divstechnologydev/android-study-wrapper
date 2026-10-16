@@ -1,5 +1,6 @@
 package one.moveo.studycore
 
+import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
@@ -9,6 +10,7 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonObject
+import okhttp3.HttpUrl.Companion.toHttpUrl
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -186,13 +188,89 @@ class ConfigValidatorTests {
         assertNull(flowWith(null).flow.prepositionPath)
     }
 
+    /// run-tests.mjs "flow.prepositionPath (§4)": present + non-empty ⇒ kept
+    /// (trimmed); absent / null / blank ⇒ null; URL-shaped values rejected.
     @Test
-    fun prepositionPathWrongTypeRejected() {
-        val minimal = loadFixture("valid-minimal.json")
-        val json = JsonObject(minimal + ("flow" to buildJsonObject { put("prepositionPath", 42) }))
-        val result = ConfigValidator.validate(json)
-        val invalid = result as? ConfigValidator.ValidationResult.Invalid ?: return fail("expected rejection")
-        assertTrue(invalid.errors.contains("flow.prepositionPath: must be a string"))
+    fun prepositionPathCaseTableMatchesExtension() {
+        fun verdict(value: JsonElement): ConfigValidator.ValidationResult {
+            val minimal = loadFixture("valid-minimal.json")
+            return ConfigValidator.validate(JsonObject(minimal + ("flow" to buildJsonObject { put("prepositionPath", value) })))
+        }
+        fun kept(value: String): String? = checkNotNull(verdict(JsonPrimitive(value)).configOrNull).flow.prepositionPath
+        assertEquals("kept", "/shop/en-GB/landing/groceries", kept("/shop/en-GB/landing/groceries"))
+        assertEquals("trimmed", "/shop/landing", kept("  /shop/landing  "))
+        assertEquals("query+fragment kept", "/landing?ref=study#top", kept("/landing?ref=study#top"))
+        assertEquals("missing leading slash kept as-is", "shop/landing", kept("shop/landing"))
+        assertNull("null ⇒ absent", checkNotNull(verdict(JsonNull).configOrNull).flow.prepositionPath)
+        assertNull("empty ⇒ absent", kept(""))
+        assertNull("blank ⇒ absent", kept("   "))
+        assertEquals("JS trim strips the BOM too", "/x", kept("﻿/x "))
+
+        val rejected = listOf(
+            "number" to JsonPrimitive(123),
+            "https URL" to JsonPrimitive("https://evil.example.net/x"),
+            "scheme javascript" to JsonPrimitive("javascript:alert(1)"),
+            "protocol-relative" to JsonPrimitive("//evil.example.net/x"),
+            "backslash" to JsonPrimitive("\\\\evil.example.net"),
+            "inner whitespace" to JsonPrimitive("/shop/my landing"),
+            "inner no-break space" to JsonPrimitive("/shop/my landing"),
+            "control character" to JsonPrimitive("/shop/\u0001"),
+            "too long" to JsonPrimitive("/" + "a".repeat(500)),
+        )
+        for ((name, value) in rejected) {
+            val invalid = verdict(value) as? ConfigValidator.ValidationResult.Invalid
+                ?: return fail("prepositionPath should be rejected: $name")
+            assertTrue("$name: ${invalid.errors}", invalid.errors.all { it.startsWith("flow.prepositionPath") })
+        }
+        assertEquals(
+            listOf("flow.prepositionPath: must be a string (≤500 chars) when present"),
+            (verdict(JsonPrimitive(42)) as ConfigValidator.ValidationResult.Invalid).errors,
+        )
+        assertEquals(
+            listOf("flow.prepositionPath: must be a path on the study origin (e.g. \"/shop/landing\"), not a URL"),
+            (verdict(JsonPrimitive("https://evil.example.net/x")) as ConfigValidator.ValidationResult.Invalid).errors,
+        )
+    }
+
+    /// run-tests.mjs §4b buildStartUrl: absent/blank ⇒ the origin root;
+    /// present ⇒ that path on the FIRST origin; whatever the stored value,
+    /// the result is always https on that host.
+    @Test
+    fun startUrlCaseTableMatchesExtension() {
+        val origins = listOf("www.tesco.com", "tesco.ie")
+        fun start(path: String?): String? = StartUrl.build(origins, path)
+        assertEquals("no path ⇒ root", "https://www.tesco.com/", start(null))
+        assertEquals("empty ⇒ root", "https://www.tesco.com/", start(""))
+        assertEquals("blank ⇒ root", "https://www.tesco.com/", start("   "))
+        assertEquals("https://www.tesco.com/shop/en-GB/landing/groceries", start("/shop/en-GB/landing/groceries"))
+        assertEquals("missing leading slash tolerated", "https://www.tesco.com/shop/landing", start("shop/landing"))
+        assertEquals("query + fragment preserved", "https://www.tesco.com/landing?ref=study#top", start("/landing?ref=study#top"))
+        assertEquals("surrounding whitespace trimmed", "https://www.tesco.com/landing", start("  /landing "))
+        assertEquals("'..' cannot leave the origin", "https://www.tesco.com/x", start("/../../x"))
+        assertEquals("protocol-relative host falls back to root", "https://www.tesco.com/", start("//evil.example.net/x"))
+        assertEquals("backslash host falls back to root", "https://www.tesco.com/", start("\\\\evil.example.net"))
+        assertEquals("absolute URL falls back to root", "https://www.tesco.com/", start("https://evil.example.net/x"))
+        assertEquals("scheme falls back to root", "https://www.tesco.com/", start("javascript:alert(1)"))
+        assertEquals("space percent-encoded like `new URL`", "https://www.tesco.com/my%20landing", start("/my landing"))
+        assertNull("no origins ⇒ null", StartUrl.build(emptyList(), "/x"))
+        assertNull("malformed origin ⇒ null", StartUrl.build(listOf("bad host"), "/x"))
+        for (path in listOf("/a", "b", "//c.com", "\\\\d.com", "https://e.com", "/../f", "?q=1", "#h", "/my landing")) {
+            val url = checkNotNull(start(path)).toHttpUrl()
+            assertEquals(path, "https", url.scheme)
+            assertEquals(path, "www.tesco.com", url.host)
+        }
+    }
+
+    @Test
+    fun prepositionPathFixtures() {
+        // Vendored with the extension's "preposition fix": the URL fixture is
+        // invalid, the empty-path fixture valid, and valid-full now carries one.
+        assertFalse(isValid(loadFixture("invalid-preposition-path-url.json")))
+        assertTrue(isValid(loadFixture("valid-preposition-path-empty.json")))
+        assertNull(validConfig(loadFixture("valid-preposition-path-empty.json")).flow.prepositionPath)
+        val full = validConfig(loadFixture("valid-full.json"))
+        assertEquals("/gol-ui/groceries/meat-and-fish?ref=study", full.flow.prepositionPath)
+        assertEquals("https://sainsburys.co.uk/gol-ui/groceries/meat-and-fish?ref=study", full.startUrl)
     }
 
     // MARK: - Extra validator cases beyond the shared fixtures
@@ -232,9 +310,11 @@ class ConfigValidatorTests {
     }
 
     @Test
-    fun sgRules21Rejected() {
-        val rules = kotlinx.serialization.json.JsonArray(List(21) { sgRule() })
-        assertFalse(isValid(minimalWithTracking(mapOf("semanticGroupRules" to rules))))
+    fun sgRulesNoCapOnRuleCount() {
+        // run-tests.mjs: "semanticGroupRules: no cap on rule count (40 accepted)"
+        val rules = kotlinx.serialization.json.JsonArray(List(40) { sgRule() })
+        val config = validConfig(minimalWithTracking(mapOf("semanticGroupRules" to rules)))
+        assertEquals(40, config.tracking.semanticGroupRules.size)
     }
 
     @Test
@@ -277,11 +357,30 @@ class ConfigValidatorTests {
     }
 
     @Test
-    fun trackedElements21EntriesRejected() {
-        val entries = kotlinx.serialization.json.JsonArray(List(21) {
+    fun trackedElementsNoCapOnEntryCount() {
+        // run-tests.mjs: "additionalTrackedElements: no cap on entry count (40 accepted)"
+        val entries = kotlinx.serialization.json.JsonArray(List(40) {
             buildJsonObject { put("selector", ".price") }
         })
-        assertFalse(isValid(minimalWithTracking(mapOf("additionalTrackedElements" to entries))))
+        val config = validConfig(minimalWithTracking(mapOf("additionalTrackedElements" to entries)))
+        assertEquals(40, config.tracking.additionalTrackedElements.size)
+    }
+
+    /// The vendored Tesco example (docs/examples/tesco-sg-rules.json) is the
+    /// extension's CSP-strict reference config; its tracking fragments carry
+    /// more than 20 force-tracked entries, so it doubles as the regression
+    /// fixture for the cap removal — a reintroduced cap fails here.
+    @Test
+    fun tescoExampleTrackingFragmentsValidate() {
+        val example = java.io.File(Fixtures.repoRoot(), "docs/examples/tesco-sg-rules.json")
+        assertTrue("tesco example missing — run scripts/vendor-tag.sh", example.isFile)
+        val tracking = Json.parseToJsonElement(example.readText()).jsonObject["tracking"]!!.jsonObject
+        val config = validConfig(minimalWithTracking(mapOf(
+            "semanticGroupRules" to tracking["semanticGroupRules"]!!,
+            "additionalTrackedElements" to tracking["additionalTrackedElements"]!!,
+        )))
+        assertTrue(config.tracking.semanticGroupRules.isNotEmpty())
+        assertTrue("the example exceeds the old 20-entry cap", config.tracking.additionalTrackedElements.size > 20)
     }
 
     @Test

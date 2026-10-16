@@ -36,6 +36,9 @@ class App : Application() {
                     null
                 }
             },
+            // CSP relay parity capture — the event spy in debug, null in
+            // release (the release DebugHooks defines it as null).
+            relayedEventsObserver = DebugHooks.relayedEventsObserver,
         )
     }
 

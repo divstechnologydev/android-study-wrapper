@@ -14,6 +14,10 @@
 //     so the app can finish a study without losing buffered events. (Native
 //     evaluates it and relays the result as a { type: "flushed" } post —
 //     evaluateJavascript cannot await a Promise.)
+//   - the tag's network calls are relayed through the native side
+//     (window.moveoFetch, a second origin-scoped WebMessageListener whose
+//     replies come back over its JavaScriptReplyProxy) — see the CSP relay
+//     block below.
 //
 // The target-match block between the markers is a verbatim copy of the
 // extension's (itself pinned to src/target-match.js by the extension's CI);
@@ -35,6 +39,146 @@
   }
 
   if (!window.MoveoOne || window.MoveoOne.__moveoExtWrapped) return;
+
+  /**
+   * CSP relay (studycore/TagRelay.kt has the full picture; extension:
+   * moveo-bootstrap.js relayTransport + src/tag-relay.js; iOS: the
+   * webkit.messageHandlers.moveoFetch reply handler). This script runs in
+   * the page's own world, so it is bound by the host page's
+   * Content-Security-Policy: a direct fetch to api.moveo.one is refused on
+   * sites with a strict connect-src (Tesco, most banks). The tag exposes a
+   * `transport` init option for exactly this: every request it would make
+   * goes through the function below, which hands it to the native side as a
+   * WebMessageListener post and resolves when the reply arrives. Only `kind`
+   * and the body cross the boundary — the native side derives URL, headers
+   * and token itself. The message is posted synchronously, so the
+   * pagehide/beforeunload drains are on their way before an unloading page
+   * is torn down (the native request outlives the page).
+   *
+   * Android handshake: a WebMessageListener has no per-message reply (unlike
+   * WKScriptMessageHandlerWithReply), so each request carries an id and the
+   * reply — posted to this frame's JavaScriptReplyProxy, delivered as a
+   * "message" event on window.moveoFetch — echoes it; the pending map below
+   * matches them up. The id is scoped to this document so a late reply can
+   * never settle a different page's promise.
+   *
+   * Every transport promise is also tracked for window.__moveoFlush, which
+   * is how study completion knows the drain has landed.
+   */
+  var RELAYED_KINDS = ["events", "ip"];
+  var RELAY_TIMEOUT_MS = 20000;
+  var inFlight = [];
+  var pendingReplies = {};
+  var relaySeq = 0;
+  var relayTag = Math.random().toString(36).slice(2, 10);
+
+  function track(promise) {
+    var settled = Promise.resolve(promise).then(
+      function () {},
+      function () {}
+    );
+    inFlight.push(settled);
+    settled.then(function () {
+      var i = inFlight.indexOf(settled);
+      if (i >= 0) inFlight.splice(i, 1);
+    });
+    return promise;
+  }
+
+  function relayHandler() {
+    var handler = window.moveoFetch;
+    return handler && typeof handler.postMessage === "function" ? handler : null;
+  }
+
+  function onRelayReply(event) {
+    var reply;
+    try {
+      reply = JSON.parse(event && event.data);
+    } catch (e) {
+      return;
+    }
+    if (!reply || typeof reply.id !== "string") return;
+    var settle = pendingReplies[reply.id];
+    if (!settle) return; // timed out, or not ours
+    delete pendingReplies[reply.id];
+    settle(reply);
+  }
+
+  (function installRelayReplyListener() {
+    var handler = relayHandler();
+    if (!handler) return;
+    try {
+      if (typeof handler.addEventListener === "function") {
+        handler.addEventListener("message", onRelayReply);
+      } else {
+        handler.onmessage = onRelayReply;
+      }
+    } catch (e) {
+      // No reply channel ⇒ every relayed request times out ⇒ the tag sees
+      // failed fetches, exactly as on a CSP-blocked page. Never throw here.
+    }
+  })();
+
+  function nativeFetch(kind, body) {
+    return new Promise(function (resolve, reject) {
+      var handler = relayHandler();
+      if (!handler) {
+        reject(new Error("MoveoOne relay: no native handler"));
+        return;
+      }
+      var id = relayTag + "-" + ++relaySeq;
+      var done = false;
+      var timer = setTimeout(function () {
+        if (done) return;
+        done = true;
+        delete pendingReplies[id];
+        reject(new Error("MoveoOne relay: timed out"));
+      }, RELAY_TIMEOUT_MS);
+      var finish = function (settle, value) {
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
+        delete pendingReplies[id];
+        settle(value);
+      };
+      pendingReplies[id] = function (result) {
+        if (!result || typeof result.status !== "number" || result.status === 0) {
+          // Same contract as a fetch that never reached the server.
+          finish(reject, new Error("MoveoOne relay: request failed"));
+          return;
+        }
+        finish(resolve, {
+          ok: !!result.ok,
+          status: result.status,
+          body: typeof result.body === "string" ? result.body : "",
+        });
+      };
+      try {
+        window.moveoFetch.postMessage(JSON.stringify({ id: id, kind: kind, body: body }));
+      } catch (e) {
+        finish(reject, new Error("MoveoOne relay: request failed"));
+      }
+    });
+  }
+
+  function relayTransport(request) {
+    if (RELAYED_KINDS.indexOf(request.kind) === -1) {
+      // A kind this bootstrap predates: keep the tag's own behaviour.
+      return track(
+        fetch(request.url, {
+          method: request.method,
+          headers: request.headers,
+          body: request.body,
+          keepalive: request.keepalive,
+        }).then(function (r) {
+          return r.text().then(function (text) {
+            return { ok: r.ok, status: r.status, body: text };
+          });
+        })
+      );
+    }
+    return track(nativeFetch(request.kind, typeof request.body === "string" ? request.body : ""));
+  }
 
   // __MOVEO_TARGET_MATCH_BEGIN__ (verbatim copy of the extension's inline
   // block, which its CI pins to src/target-match.js — never hand-edit)
@@ -122,68 +266,36 @@
 
   /**
    * Flush bridge for study completion. The tag batches events (5 s interval /
-   * size threshold) and its senders — flush() and sendEventImmediate() — call
-   * fetch without returning the promise, so nothing can be awaited as-is.
-   * Both are wrapped here to capture the fetch promises they create
-   * synchronously (window.fetch is swapped only for the duration of the
-   * call — the DEBUG ingest redirect and the event spy sit underneath and
-   * keep working). window.__moveoFlush(timeoutMs) then drains the buffer and
-   * resolves when every tracked POST has settled, or at the timeout.
+   * size threshold) and its senders — flush() and sendEventImmediate() — do
+   * not return their request promises, so nothing can be awaited as-is.
+   * Every request now goes through relayTransport, which tracks each promise
+   * in `inFlight`; window.__moveoFlush(timeoutMs) drains the buffer and
+   * resolves when every tracked request has settled, or at the timeout.
    * Observation only: nothing is mutated, blocked, or delayed.
    */
   function installFlushBridge(inst) {
-    var inFlight = [];
-    function untrack(p) {
-      var i = inFlight.indexOf(p);
-      if (i >= 0) inFlight.splice(i, 1);
-    }
-    function tracked(fn) {
-      return function () {
-        var origFetch = window.fetch;
-        var calls = [];
-        window.fetch = function () {
-          var p = origFetch.apply(this, arguments);
-          calls.push(p);
-          return p;
-        };
-        try {
-          return fn.apply(this, arguments);
-        } finally {
-          window.fetch = origFetch;
-          calls.forEach(function (p) {
-            var settled = Promise.resolve(p).then(
-              function () {},
-              function () {}
-            );
-            inFlight.push(settled);
-            settled.then(function () {
-              untrack(settled);
-            });
-          });
-        }
-      };
-    }
-    if (typeof inst.flush === "function") inst.flush = tracked(inst.flush);
-    if (typeof inst.sendEventImmediate === "function") {
-      inst.sendEventImmediate = tracked(inst.sendEventImmediate);
-    }
-
     window.__moveoFlush = function (timeoutMs) {
       try {
         inst.flush();
       } catch (e) {
         // Never let a tag error block completion.
       }
-      var waiting = inFlight.slice();
-      var done = Promise.all(waiting).then(function () {
-        return { sent: waiting.length, timedOut: false };
-      });
-      var timeout = new Promise(function (resolve) {
-        setTimeout(function () {
+      return new Promise(function (resolve) {
+        var waiting = [];
+        var timer = setTimeout(function () {
           resolve({ sent: waiting.length, timedOut: true });
         }, typeof timeoutMs === "number" ? timeoutMs : 2500);
+        // The tag hands a request to the transport from a microtask
+        // (sendRequest: Promise.resolve().then(transport)), so the in-flight
+        // list is read one macrotask later to include the drain just issued.
+        setTimeout(function () {
+          waiting = inFlight.slice();
+          Promise.all(waiting).then(function () {
+            clearTimeout(timer);
+            resolve({ sent: waiting.length, timedOut: false });
+          });
+        }, 0);
       });
-      return Promise.race([done, timeout]);
     };
   }
 
@@ -224,7 +336,10 @@
   }
 
   extInitialized = true;
-  var instance = realInit.call(window.MoveoOne, __MOVEO_PAYLOAD__.token, __MOVEO_PAYLOAD__.options);
+  // The transport is attached here, not in the native payload: functions
+  // cannot be inlined as JSON, and this is the only init we own.
+  var options = Object.assign({}, __MOVEO_PAYLOAD__.options, { transport: relayTransport });
+  var instance = realInit.call(window.MoveoOne, __MOVEO_PAYLOAD__.token, options);
   if (instance && __MOVEO_PAYLOAD__.targetAction && __MOVEO_PAYLOAD__.targetAction.props) {
     installTargetHooks(instance, __MOVEO_PAYLOAD__.targetAction.props);
   }

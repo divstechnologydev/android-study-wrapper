@@ -138,9 +138,7 @@ object ConfigValidator {
                 present(f["leadOutUrl"])?.let {
                     if (!isHttpsUrl(it)) errors += "flow.leadOutUrl: must be an https URL"
                 }
-                present(f["prepositionPath"])?.let {
-                    if (asString(it) == null) errors += "flow.prepositionPath: must be a string"
-                }
+                validatePrepositionPath(f["prepositionPath"], errors)
                 present(f["appendParticipantId"])?.let {
                     if (!isBool(it)) errors += "flow.appendParticipantId: must be boolean"
                 }
@@ -188,10 +186,10 @@ object ConfigValidator {
             flow = StudyConfig.Flow(
                 leadInUrl = flowObj?.let { asString(it["leadInUrl"]) },
                 leadOutUrl = flowObj?.let { asString(it["leadOutUrl"]) },
-                // Empty/whitespace collapses to null ("ignore it, keep the
-                // current behavior") so consumers never re-check emptiness.
+                // normalizePrepositionPath: null / blank collapse to absent
+                // so consumers only ever see a non-empty, trimmed path or null.
                 prepositionPath = flowObj?.let { asString(it["prepositionPath"]) }
-                    ?.trim()?.takeIf { it.isNotEmpty() },
+                    ?.trimJs()?.takeIf { it.isNotEmpty() },
                 appendParticipantId = flowObj?.get("appendParticipantId")
                     ?.takeIf { isBool(it) }?.jsonPrimitive?.content?.toBoolean() ?: false,
                 targetAction = buildTargetAction(flowObj?.get("targetAction")), // unknown type ⇒ null (treated as absent)
@@ -212,7 +210,8 @@ object ConfigValidator {
             errors += "tracking.semanticGroupRules: must be an array"
             return
         }
-        if (rules.size > 20) errors += "tracking.semanticGroupRules: max 20 rules"
+        // No cap on the number of rules (per-rule limits below still apply):
+        // a site with several markups per concept needs one rule per markup.
         for ((i, r) in rules.withIndex()) {
             val at = "tracking.semanticGroupRules[$i]"
             val rule = asObject(r) ?: run {
@@ -260,7 +259,7 @@ object ConfigValidator {
             errors += "tracking.additionalTrackedElements: must be an array"
             return
         }
-        if (entries.size > 20) errors += "tracking.additionalTrackedElements: max 20 entries"
+        // No cap on the number of entries (per-entry limits below still apply).
         for ((i, e) in entries.withIndex()) {
             val at = "tracking.additionalTrackedElements[$i]"
             val entry = asObject(e) ?: run {
@@ -275,6 +274,33 @@ object ConfigValidator {
                     errors += "$at.type: must be a non-empty string (≤50 chars) when present"
                 }
             }
+        }
+    }
+
+    // flow.prepositionPath (§4): the page on the FIRST tracked origin the
+    // participant is sent to after enrolling. Optional; null / empty / blank
+    // mean "absent" (start at the origin root). Must be a path on that
+    // origin, never a URL: anything with a scheme ("https:", "javascript:"),
+    // a protocol-relative "//host" or a "\" (which URL parsers treat as "/")
+    // is rejected so the path can't send the participant off the study site.
+    // A missing leading "/" is tolerated at use time (StartUrl.build).
+    const val PREPOSITION_PATH_MAX = 500
+
+    /// JS `[\s\u0000-\u001f\u007f]` — `\s` is Unicode whitespace in JS, so
+    /// `\p{Z}` + the BOM are spelled out (Java's `\s` is ASCII-only).
+    private val UNSAFE_PATH_CHARS_REGEX = Regex("[\\s\\p{Z}\\uFEFF\\u0000-\\u001F\\u007F]")
+
+    private fun validatePrepositionPath(raw: JsonElement?, errors: MutableList<String>) {
+        val value = present(raw) ?: return // undefined or null ⇒ absent
+        val p = asString(value)
+        if (p == null || p.length > PREPOSITION_PATH_MAX) {
+            errors += "flow.prepositionPath: must be a string (≤$PREPOSITION_PATH_MAX chars) when present"
+            return
+        }
+        val t = p.trimJs()
+        if (t.isEmpty()) return // empty ⇒ absent
+        if (StartUrl.NOT_A_PATH_REGEX.containsMatchIn(t) || UNSAFE_PATH_CHARS_REGEX.containsMatchIn(t)) {
+            errors += "flow.prepositionPath: must be a path on the study origin (e.g. \"/shop/landing\"), not a URL"
         }
     }
 

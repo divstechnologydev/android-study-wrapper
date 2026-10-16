@@ -173,10 +173,44 @@ class StudyWebViewController(
             if (type == "flushed") flushResult?.complete(Unit)
             model.handleBridgeMessage(type = type, body = body)
         }
+        installRelay(webView, rules)
         // M5 parity capture: separate "moveoDebug" listener, same origin
         // rules. Bound at creation — the spy toggle applies the next time
         // the browser is opened (as on iOS). No-op in release.
         DebugHooks.installEventSpyBridge(webView, rules)
+    }
+
+    /// CSP relay (← iOS `moveoFetch` reply handler; extension: background
+    /// TAG_FETCH): the tag's network calls, relayed from the bootstrap
+    /// because the page's Content-Security-Policy may block api.moveo.one
+    /// from the page world (studycore TagRelay has the trust model). A
+    /// WebMessageListener has no per-message reply, so every request carries
+    /// an id the reply echoes, posted back over the sending frame's
+    /// JavaScriptReplyProxy. The frame's origin (`sourceOrigin`), not anything
+    /// in the message, is what the relay checks against the study origins —
+    /// and the object only exists on study origins to begin with (same rules
+    /// as the bridge). Always answers a well-formed request — the page side
+    /// holds a pending promise until it hears back or times out.
+    @SuppressLint("RequiresFeature") // see installUserScripts
+    private fun installRelay(webView: WebView, rules: Set<String>) {
+        WebViewCompat.addWebMessageListener(webView, "moveoFetch", rules) { _, message, sourceOrigin, _, replyProxy ->
+            val data = message.data ?: return@addWebMessageListener
+            val body = try {
+                Json.parseToJsonElement(data).jsonObject
+            } catch (_: Exception) {
+                return@addWebMessageListener
+            }
+            // No id ⇒ not our bootstrap's message ⇒ nothing is waiting.
+            val id = (body["id"] as? JsonPrimitive)?.takeIf { it.isString }?.content
+                ?: return@addWebMessageListener
+            val senderHost = sourceOrigin.host.orEmpty()
+            model.relayTagRequest(body, senderHost) { reply ->
+                // The request itself outlives the WebView (app scope); only
+                // the answer is dropped once there is no page to receive it.
+                if (this.webView !== webView) return@relayTagRequest
+                replyProxy.postMessage(reply.toMessage(id))
+            }
+        }
     }
 
     // MARK: - BrowserProxy

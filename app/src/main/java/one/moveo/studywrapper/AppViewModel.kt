@@ -8,6 +8,8 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
@@ -31,8 +33,10 @@ import one.moveo.studycore.SessionIds
 import one.moveo.studycore.SetupLink
 import one.moveo.studycore.StudyConfig
 import one.moveo.studycore.StudyStore
+import one.moveo.studycore.TagRelay
 import one.moveo.studycore.TargetAction
 import one.moveo.studycore.TargetMatch
+import one.moveo.studycore.generated.TagEndpoint
 import one.moveo.studywrapper.browser.BrowserProxy
 
 /// App-level state machine (← iOS AppModel.swift). Owns the store and drives
@@ -51,6 +55,12 @@ class AppViewModel(
     /// Reads a bundled asset (the vendored tag + bootstrap); injected so this
     /// class stays constructor-testable. Returns null when missing.
     private val assetLoader: (String) -> String? = { null },
+    /// DEBUG parity capture seam for the CSP relay (← iOS
+    /// `handleDebugSpyMessage` under `#if DEBUG`): called with every relayed
+    /// event batch that passed the relay's checks, BEFORE it is sent —
+    /// `(ingestUrl, senderHost, body)`. The debug source set wires the event
+    /// spy here; release passes null, so no observer code exists there.
+    private val relayedEventsObserver: ((url: String, host: String, body: String) -> Unit)? = null,
     private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate),
     /// Wall clock for every persisted timestamp and the lead-out due check;
     /// injected so JVM tests can advance it in step with virtual time.
@@ -153,6 +163,21 @@ class AppViewModel(
 
     /// DEBUG explicit ingest-redirect override (the iOS `ingestOverride`).
     var ingestOverride: String? = null
+
+    /// Where the tag's events should be rerouted in DEBUG builds (the iOS
+    /// `effectiveIngestRedirect`): an explicit override wins; otherwise a
+    /// config that declares a different endpoint than the tag's baked one
+    /// (dev studies) is honored automatically. Null = no redirect (prod
+    /// behavior), always null in release. One definition for both consumers:
+    /// the page-world fetch rewrite (DebugHooks.ingestRedirectScript) and the
+    /// native relay below.
+    val effectiveIngestRedirect: String?
+        get() {
+            if (!isDebugBuild) return null
+            ingestOverride?.takeIf { it.isNotEmpty() }?.let { return it }
+            return store.activeStudy?.config?.tracking?.apiUrl
+                ?.takeIf { it != TagEndpoint.apiUrl }
+        }
 
     val apiBase: HttpUrl
         get() {
@@ -583,6 +608,43 @@ class AppViewModel(
     /// target fired). Takes effect on the next page load.
     private fun refreshUserScript() {
         browser?.applyUserScript(currentUserScriptSource())
+    }
+
+    // MARK: - CSP relay (← iOS AppModel.relayTagRequest; extension: background TAG_FETCH → src/tag-relay.js)
+
+    /// Answers one relayed tag request (`{ id, kind, body }` from the
+    /// bootstrap's transport, already parsed). URL and token come from the
+    /// active study, never from the message; `senderHost` is the posting
+    /// frame's origin host. In DEBUG the ingest redirect applies here (the
+    /// page-world fetch rewrite cannot see relayed requests) and the event
+    /// spy mirrors relayed batches. Never throws; a refused or failed request
+    /// is the `FAILED` reply, which the tag sees as a failed fetch.
+    suspend fun relayTagRequestNow(message: JsonObject, senderHost: String): TagRelay.Reply {
+        // The demo never injects the tag, so nothing legitimate relays from
+        // it — refusing keeps "nothing is recorded" true even for a page that
+        // forges relay messages against the demo's token.
+        val study = store.activeStudy?.takeIf { !it.isDemo } ?: return TagRelay.Reply.FAILED
+        val ingestUrl = effectiveIngestRedirect ?: TagEndpoint.apiUrl
+        val request = TagRelay.buildRequest(
+            message = message, study = study, senderHost = senderHost, ingestUrl = ingestUrl,
+        ) ?: return TagRelay.Reply.FAILED
+        relayedEventsObserver?.let { observe ->
+            if ((message["kind"] as? JsonPrimitive)?.content == "events") {
+                (message["body"] as? JsonPrimitive)?.takeIf { it.isString }?.content?.let { body ->
+                    observe(ingestUrl, senderHost.lowercase(), body)
+                }
+            }
+        }
+        return TagRelay.perform(request)
+    }
+
+    /// Callback form for the WebView listener. Runs in the app scope, not
+    /// the browser's: a `pagehide` drain posted by an unloading page — or by
+    /// a browser the participant is closing — must complete even after the
+    /// WebView is gone (the iOS unstructured `Task` has the same lifetime).
+    /// `onReply` is invoked on the main thread.
+    fun relayTagRequest(message: JsonObject, senderHost: String, onReply: (TagRelay.Reply) -> Unit) {
+        scope.launch { onReply(relayTagRequestNow(message, senderHost)) }
     }
 
     // MARK: - URL-driven flow (extension: target-service.handleUrlChange)

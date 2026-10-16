@@ -11,6 +11,9 @@ object DebugHooks {
 
     var appContext: android.content.Context? = null
 
+    /// No relay observer in release: the model's observer branch is dead.
+    val relayedEventsObserver: ((url: String, host: String, body: String) -> Unit)? = null
+
     @Suppress("UNUSED_PARAMETER")
     fun applyLaunchExtras(intent: Intent?, model: AppViewModel) = Unit
 
