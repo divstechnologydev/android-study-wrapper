@@ -7,7 +7,8 @@ tag into the study's websites. The Android sibling of the iOS study wrapper.
 **Status: in progress.** Phases a0–a3.2 (skeleton, `:studycore` port,
 activation/consent/browser, parity capture, feature matrix), h1–h2 (store
 flavors, signing), a1.4 (link-first activation with transaction id +
-client enrollment id) and a2.8 (finishing a study) are done; open items
+client enrollment id), a2.8 (finishing a study), a2.9 (session link) and
+a2.10 (Content-Security-Policy relay) are done; open items
 are platform-side (assetlinks, landing page) and release paperwork. Implementation follows
 [docs/plan.md](docs/plan.md) phase by phase. Build: `./gradlew build`; unit
 tests: `./gradlew :studycore:test`. [docs/](docs/) is the plan and context
@@ -177,6 +178,66 @@ Not consent wording, so `ConsentConstants.TEXT_VERSION` is unchanged.
 `InstructionsTests` pins the extension's case table; the validator rejects
 > 2000 chars (vendored fixture `invalid-instructions-too-long.json`).
 
+## Content-Security-Policy relay
+
+Parity with the extension's `sec-policy-overcome` branch and the iOS
+`csp-fixes` branch ([docs/a6-csp-relay.md](docs/a6-csp-relay.md)). The
+injected tag runs in the study page's own JavaScript world, so its requests
+are governed by the host site's Content-Security-Policy — sites with a
+strict `connect-src` (Tesco, most banks) refuse `api.moveo.one` from the
+page and no event ever leaves. The vendored tag therefore has a `transport`
+init option, and the bootstrap routes every tag request through the native
+side:
+
+```
+tag → options.transport (moveo-bootstrap.android.js)
+    → window.moveoFetch.postMessage({ id, kind, body })   (origin-scoped WebMessageListener)
+    → StudyWebViewController → AppViewModel.relayTagRequest → studycore/TagRelay.kt → OkHttp
+    … and the reply { id, ok, status, body } comes back over the frame's
+      JavaScriptReplyProxy; the bootstrap matches it to the pending promise by id.
+```
+
+Same trust model as the extension's `src/tag-relay.js` and iOS's
+`TagRelay.swift`: only a request `kind` (`events` | `ip`) and an opaque body
+cross the page boundary. The URL and the `Authorization` token are derived
+natively from the active study; the posting frame's origin must match the
+study origins (and the `moveoFetch` object only exists on study origins to
+begin with — same `allowedOriginRules` as the bridge); event bodies must be
+a `{ "events": [...] }` document ≤ 1 MiB; responses are capped at 64 KiB;
+15 s native timeout, 20 s page-side timeout. Anything else replies
+`{ ok: false, status: 0 }`, which the tag sees as a failed fetch. The relay
+message is posted synchronously, so the tag's `pagehide`/`beforeunload`
+drains survive page teardown, and the native request runs in the app scope
+so it outlives the WebView. The demo never relays (no tag, and a forged
+message against the demo is refused). `TagRelayTests` ports the extension's
+builder cases, runs `perform` against a MockWebServer and pins the seams (no
+page-world fetch of the ingestion URL left in the vendored tag; bootstrap
+and native side agree on the object name, the kinds and the id handshake);
+`AppViewModelRelayTests` covers the model's refusals and the DEBUG knock-on
+effects. `scripts/relay-smoke.sh` runs the real tag + bootstrap in a real
+WebView under `connect-src 'none'` (instrumented `RelaySmokeTest`) and
+checks that events still arrive through the relay — re-run it after every
+re-vendor:
+
+```sh
+scripts/relay-smoke.sh        # needs a booted AVD / device over adb
+```
+
+Knock-on effects in debug builds: the ingest redirect and the event spy
+apply to relayed requests natively (`AppViewModel.effectiveIngestRedirect`,
+`EventSpy.observeRelayedPost`; the page-world `fetch` wrappers only see the
+fallback path now), and the IP lookup follows the redirected ingestion host
+like the extension's dev build.
+
+The vendored tag is the extension build (`libVersion` `1.0.22-ext`): on top
+of the relay seam it registers its click listener in the capture phase and
+falls back to `aria-label`/`title`/image `alt` for icon-only controls, and
+there is no longer a cap of 20 on `semanticGroupRules` /
+`additionalTrackedElements` (validator and tag both; per-entry limits stay).
+`docs/examples/tesco-sg-rules.json` is the extension's CSP-strict example
+config (21 force-tracked entries — the validator test suite uses it as the
+cap-removal fixture).
+
 ## Finishing a study
 
 Parity with the extension's and iOS's `done-finish` branches
@@ -196,7 +257,7 @@ the study, and the participant can finish it themselves.
   home screen (tracking continues) — Android's way out without finishing.
 - **Events are flushed first**: before the browser is torn down, the app
   runs `window.__moveoFlush()` (bootstrap-installed; drains the tag's
-  buffer and resolves when the POSTs land, bounded by
+  buffer and resolves when the relayed POSTs land, bounded by
   `FlowConstants.COMPLETION_FLUSH_TIMEOUT_SECONDS`) and waits for the
   page's `flushed` bridge reply. Debug: `completion flush → sent N timedOut
   B` on `moveo-backend`.
@@ -283,8 +344,9 @@ Links fingerprints — are tracked item by item in
 
 Tag updates ship **deliberately**: re-run `scripts/vendor-tag.sh` against
 the updated extension repo, commit the new `VENDOR.json`
-(commit hash + sha256 is the provenance), re-run the fixture suite and the
-a3.1 parity diff, then release. Never edit `assets/moveo-one.js`.
+(commit hash + sha256 is the provenance), re-run the fixture suite, the
+relay smoke test (`scripts/relay-smoke.sh`) and the a3.1 parity diff, then
+release. Never edit `assets/moveo-one.js`.
 
 **Exit criteria (a4 + h):** production release on Google Play and Huawei
 AppGallery; pilot study data verified comparable with desktop/iOS cohorts.

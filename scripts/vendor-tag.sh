@@ -8,6 +8,8 @@
 #                                        product promise)
 #   - app/src/main/assets/VENDOR.json    provenance: source commit, sha256, date
 #   - docs/examples/sainsburys-sg-rules.json  example config for the M6 real-site check
+#   - docs/examples/tesco-sg-rules.json  example config for a CSP-strict site
+#                                        (the relay's reason to exist — README)
 #   - studycore/src/test/resources/fixtures/*.json
 #                                        the validator acceptance suite (M1)
 #   - studycore/src/main/kotlin/one/moveo/studycore/generated/TagEndpoint.kt
@@ -44,8 +46,9 @@ rm -rf "$FIXDIR"
 mkdir -p "$FIXDIR"
 cp "$EXT"/docs/schema/fixtures/*.json "$FIXDIR/"
 
-# ── Real-site example config (M6) ────────────────────────────────────────────
+# ── Real-site example configs (M6; Tesco = CSP-strict relay check) ──────────
 cp "$EXT/docs/examples/sainsburys-sg-rules.json" "$ROOT/docs/examples/sainsburys-sg-rules.json"
+cp "$EXT/docs/examples/tesco-sg-rules.json" "$ROOT/docs/examples/tesco-sg-rules.json"
 
 # ── Extract the tag's baked-in ingestion URL → generated Kotlin constant ─────
 TAG_API_URL="$(sed -n 's/.*const API_URL = "\([^"]*\)".*/\1/p' "$ASSETS/moveo-one.js" | head -1)"

@@ -438,6 +438,28 @@ leaving do NOT report (extension parity). Details:
 backend has no `/sessions` route yet — it 404s, which the best-effort path
 absorbs; add the route in the extension repo to observe the body).*
 
+### a2.10 Content-Security-Policy relay
+
+Port of the iOS `csp-fixes` branch / extension `sec-policy-overcome` branch
+(2026-10-16): the tag's network calls (`events` batches, the `ip` lookup)
+no longer go out from the page world — where a strict `connect-src` blocks
+them — but through the native side. The re-vendored tag (`1.0.22-ext`,
+extension commit `acda744`) exposes `options.transport`; the bootstrap
+posts `{ id, kind, body }` to a second origin-scoped WebMessageListener
+(`moveoFetch`) and resolves the tag's promise when the reply echoing the
+id arrives over the frame's `JavaScriptReplyProxy`; `studycore/TagRelay.kt`
+is the branch-for-branch port of `src/tag-relay.js` (URL + token derived
+from the active study, sender origin checked, body/response caps, 15 s
+OkHttp call timeout); `AppViewModel.relayTagRequest` adds the demo refusal
+and the DEBUG knock-ons (native ingest redirect, native spy mirroring).
+Flush bridge rewritten with it (tracked transport promises instead of
+fetch swapping). Validator and tag drop the 20-entry caps on sg rules /
+tracked elements. Details and Android decisions:
+[docs/a6-csp-relay.md](a6-csp-relay.md).
+*Status 2026-10-16: implemented — studycore (+26 tests incl. MockWebServer
+`perform` cases and seam pins), bootstrap, WebView listener, model (+9 app
+JVM tests), instrumented `RelaySmokeTest` (`scripts/relay-smoke.sh`).*
+
 ---
 
 ## Phase a3 — parity verification
@@ -446,7 +468,10 @@ absorbs; add the route in the extension repo to observe the body).*
 
 Debug-only event spy (`moveo-event-spy.android.js`): wrap `window.fetch`,
 mirror tag POST bodies to a second bridge listener (`moveoDebug`), append
-JSONL to app files (`moveo-events.jsonl`), export via share sheet. Run the
+JSONL to app files (`moveo-events.jsonl`), export via share sheet. Since
+a2.10 the tag's batches travel as relay messages, which the model mirrors
+natively into the same capture (`EventSpy.observeRelayedPost`); the fetch
+wrapper covers only the transport's fallback path. Run the
 same scripted journey on desktop extension and Android app against
 `mock-backend.sh`; diff with the iOS repo's `Scripts/diff-events.mjs`
 (reused as-is). **Acceptance:** no missing/extra event kinds, identical
@@ -684,6 +709,10 @@ Every deliberate divergence from the iOS reference, in one place:
 | Completion data clearing (a2.8) | per-origin | wholesale, same as leave | see leave-study row |
 | Session-link report ordering (a2.9) | — (iOS pending; extension `await`s `reportSession` before deactivating) | fire-and-forget `scope.launch` after capturing the ids, storage cleared without waiting | the extension awaits only because `deactivate()` would wipe the ids it reads; Android captures them into locals first, and a2.8's persist-immediately rule outranks request ordering |
 | Session-id write serialization (a2.9) | — | none needed (plain read-modify-write) | extension chains promises because `chrome.storage` is async and tabs race; Android bridge posts and state writes share the main thread |
+| CSP relay handshake (a2.10) | `WKScriptMessageHandlerWithReply` (`moveoFetch`, page-global, per-message reply) | second `addWebMessageListener` (`moveoFetch`, origin-scoped); request carries an `id`, the reply echoes it over the frame's `JavaScriptReplyProxy`, the bootstrap correlates | a WebMessageListener has no per-message reply channel; ids are scoped per document so a late reply can never settle another page's promise |
+| CSP relay request lifetime (a2.10) | unstructured `Task` from the coordinator | `AppViewModel` app scope (`scope.launch`), reply dropped if the WebView is gone | same intent: a `pagehide` drain or a request in flight while the browser closes must still land |
+| CSP relay transport (a2.10) | `URLSession.shared`, `timeoutInterval` 15 s | `TagRelay.defaultClient` (OkHttp, `callTimeout` 15 s) | platform HTTP stack; the whole-call timeout is the closest analogue of the extension's `AbortSignal.timeout` |
+| CSP relay smoke test (a2.10) | `Scripts/relay-smoke.swift` (offscreen WKWebView, `swiftc`) | instrumented `RelaySmokeTest` on a real WebView (`scripts/relay-smoke.sh`) | no offscreen WebView outside a device; the production `ScriptBuilder` assembly is exercised too |
 
 Anything not in this table is expected to behave identically to the iOS app;
 a difference found later is a bug in one of the two.

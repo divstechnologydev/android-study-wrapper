@@ -5,10 +5,14 @@
 //
 // Wraps window.fetch and mirrors the tag's event POST bodies to the native
 // side (WebMessageListener "moveoDebug") BEFORE they leave for the ingestion
-// endpoint. The tag posts exclusively via fetch (its "sendBeacon" mentions
-// are comments only — verified against the vendored source), so this one
-// seam sees every event: buffered flushes, immediate sends, and unload
-// drains. Observation only: the original fetch always proceeds untouched.
+// endpoint. Observation only: the original fetch always proceeds untouched.
+//
+// Since the CSP relay, the tag's event batches travel as relay messages, not
+// page-world fetches — those are mirrored natively instead
+// (AppViewModel.relayTagRequest → EventSpy.observeRelayedPost, same capture
+// format). This wrapper still covers the transport's page-world fallback
+// path, so the two seams together see every event: buffered flushes,
+// immediate sends, and unload drains.
 (function () {
   if (window.__moveoSpyInstalled) return;
   window.__moveoSpyInstalled = true;

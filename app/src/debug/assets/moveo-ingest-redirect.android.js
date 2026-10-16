@@ -5,6 +5,12 @@
 // fetch URLs so events land where the config declares. Placeholders are
 // substituted natively before injection; the whole script lives in the debug
 // source set and is absent from release builds.
+//
+// Since the CSP relay, the tag's event and IP calls no longer touch
+// window.fetch — the native side applies the same redirect to relayed
+// requests (AppViewModel.relayTagRequest via effectiveIngestRedirect). This
+// wrapper remains for the transport's page-world fallback path (request
+// kinds the bootstrap predates).
 (function () {
   "use strict";
   var FROM = "__MOVEO_INGEST_FROM__";

@@ -1,5 +1,6 @@
 package one.moveo.studycore
 
+import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
@@ -232,9 +233,11 @@ class ConfigValidatorTests {
     }
 
     @Test
-    fun sgRules21Rejected() {
-        val rules = kotlinx.serialization.json.JsonArray(List(21) { sgRule() })
-        assertFalse(isValid(minimalWithTracking(mapOf("semanticGroupRules" to rules))))
+    fun sgRulesNoCapOnRuleCount() {
+        // run-tests.mjs: "semanticGroupRules: no cap on rule count (40 accepted)"
+        val rules = kotlinx.serialization.json.JsonArray(List(40) { sgRule() })
+        val config = validConfig(minimalWithTracking(mapOf("semanticGroupRules" to rules)))
+        assertEquals(40, config.tracking.semanticGroupRules.size)
     }
 
     @Test
@@ -277,11 +280,30 @@ class ConfigValidatorTests {
     }
 
     @Test
-    fun trackedElements21EntriesRejected() {
-        val entries = kotlinx.serialization.json.JsonArray(List(21) {
+    fun trackedElementsNoCapOnEntryCount() {
+        // run-tests.mjs: "additionalTrackedElements: no cap on entry count (40 accepted)"
+        val entries = kotlinx.serialization.json.JsonArray(List(40) {
             buildJsonObject { put("selector", ".price") }
         })
-        assertFalse(isValid(minimalWithTracking(mapOf("additionalTrackedElements" to entries))))
+        val config = validConfig(minimalWithTracking(mapOf("additionalTrackedElements" to entries)))
+        assertEquals(40, config.tracking.additionalTrackedElements.size)
+    }
+
+    /// The vendored Tesco example (docs/examples/tesco-sg-rules.json) is the
+    /// extension's CSP-strict reference config; its tracking fragments carry
+    /// more than 20 force-tracked entries, so it doubles as the regression
+    /// fixture for the cap removal — a reintroduced cap fails here.
+    @Test
+    fun tescoExampleTrackingFragmentsValidate() {
+        val example = java.io.File(Fixtures.repoRoot(), "docs/examples/tesco-sg-rules.json")
+        assertTrue("tesco example missing — run scripts/vendor-tag.sh", example.isFile)
+        val tracking = Json.parseToJsonElement(example.readText()).jsonObject["tracking"]!!.jsonObject
+        val config = validConfig(minimalWithTracking(mapOf(
+            "semanticGroupRules" to tracking["semanticGroupRules"]!!,
+            "additionalTrackedElements" to tracking["additionalTrackedElements"]!!,
+        )))
+        assertTrue(config.tracking.semanticGroupRules.isNotEmpty())
+        assertTrue("the example exceeds the old 20-entry cap", config.tracking.additionalTrackedElements.size > 20)
     }
 
     @Test

@@ -1,0 +1,145 @@
+{
+  "$comment": "Tesco (tesco.com) tracking config fragments — reference copy only, loaded by nothing. To use, paste the arrays into a study config under tracking.* (contract: docs/config-schema.md §3.1/§3.2; guides: docs/README.md → 'Semantic-group (sg) rules' and 'Force-tracked elements'). Tesco's 2026 DDS-web (CSS-modules) build renders product tiles with two different components, so there is one sg rule per markup variant — the variants' selectors are disjoint, so whichever isn't present on a page is inert. (1) Carousel / recommendation tile (homepage, 'you may also like' rails): <section data-testid='product-<id>' data-product-id='<id>' aria-label='<product name>'> — the tile stamps the clean name on its own aria-label (first source), the h2 title link text is the fallback, and the tile's data-testid (product_<id>) is the last resort. The tile also holds a nested attribute-less <section> around promotions + buybox; closest() walks past it to the outer tile. (2) Listing / search grid tile (groceries, browse, search — ul[data-testid='dynamic-grid'] > li): <li data-testid='<id>'> with no data-product-id or aria-label, so the container is identified by the product-tile heading it contains (:has) and named from that heading's link text, then any h2 product link, then the bare numeric data-testid. Anchor only on data-* attributes, the design-system's public ddsweb-* classes and the semantic online-components-product-tile-* BEM classes — the _1bCRSG_* / rWr0Xq_* / Y4g-HG_* / WL_DZkV_* tokens are CSS-module hashes and the carousel ids (ddsweb-ghs-carousel-_r_2_) are React-generated; all change across builds/renders. additionalTrackedElements force-tracks the fragments the heuristics roll up into the tile text, again per variant: carousel tile — buybox price <p>s (price_retail = first <p> of the price container, e.g. £64.99; price_unit = a second <p>, not present on the marketplace sample this was derived from, kept as an inert guess), promotion value bar (price_promo = 'Was £89.99 Now £64.99' / Clubcard-price style text; promo_terms = 'Offer valid until …'), delivery line (delivery_message = 'Sold by Marketplace seller.'); grid tile — price text (price_retail = £13.79), unit price (price_unit = £22.98/kg), fulfilment line (delivery_message = '£2.99 Courier Delivery by Mon 19 Oct. Sold by Marketplace seller.'). The offer-sash badge (badge = 'Marketplace.' and other tags) uses the same ddsweb-tag class in both variants. Quantity controls (shown once a product is in the trolley) come in two markups too, so there is one trio of entries per variant: the carousel tile uses the design-system component (ddsweb-quantity-controls-* data-auto buttons, count in .ddsweb-quantity-controls__subtext); the grid/listing tile (and the same product-tile component rendered outside a grid) uses the BEM buybox classes (online-components-product-tile-buybox-increment/decrement-button__button, count in ...-buybox-quantity__label). Either way: +/- → quantity_add / quantity_remove — the buttons have no text, so eV is their aria-label, e.g. 'add 1 <product name>' / 'remove 1 <product name> from trolley', which the tag falls back to for icon-only controls; the count → quantity with eV '3', re-rendered by Tesco on each change so a fresh appear carries the new count. The third sg rule is a structural fallback for that product-tile component when it is NOT inside a <li data-testid> (its own wrapper divs carry only hashed classes): the container is the div exactly three levels above the tile heading, named from the heading link. For tiles inside the grid the li rule still wins (rules are tried in array order), so it changes nothing there. The tile's favourites button is icon-only with a title ('Save to a Favourites list'), which the same fallback reports as eV. Basket summary — again two markups, grouped by their own stable attribute (sg basket_summary = the trolley-page mini basket, <div aria-label='Basket Summary'>; sg guide_price_grid = the site-header basket, <a data-testid='Guide Price Grid'>) and typed identically so the events line up across both: basket_total = the amount (appear/disappear with eV '£286.54'; Tesco re-renders the summary on basket changes, so each change yields a fresh appear with the new total — if a page ever updates the text in place instead, the total is still carried by the next click's context), basket_link = the whole summary anchor (eV its full text, e.g. '£286.54 Total (estimated)'), basket_button = the header's icon button (eV 'Basket' via aria-label; the icon is a <button> inside the <a>, so a click on the icon attributes to the button, a click on the text to the link), checkout_link = the mini basket's Checkout link — which also gives the study target a precise hook: targetAction event_match { eA: 'click', eT: 'checkout_link' }. Variants share one entry via selector lists (a, b, c) to stay under the 20-entry cap. Mini-trolley items (<ul id='MPBasketSummary'> > <li data-auto='mini-trolley-content-item' data-product-id>): a third quantity markup — + / - are data-auto icon-plus / icon-minus (aria-labels 'Increase <product> by one' / 'Decrease … by one', so eV differs in wording from the tile variants but eT is the same quantity_add / quantity_remove), the count is the <h5> inside output[data-auto='trolley-product-quantity'] (quantity; the h5 is targeted rather than the output so the count is emitted once, not as output + heading), plus two item-only elements: remove_item = the X button (eV 'Remove <product> from basket') and line_price = h5[data-testid='calculated-price'] (eV '£38.00', quantity × unit price). The item's sg rule names it from the title h4 (then the title block, then data-product-id); it sits BEFORE the Basket Summary rule in the array so items keep their product name even if the list is nested inside the summary container. The item's own aria-label ('2 TENA … for £38.00') is deliberately not a name source — it embeds quantity and price, which change. The title link and image link are tracked by the heuristics already (eT link; the image link's eV is the image alt, 'Image of <product>', via the tag's accessible-name fallback). Groceries basket page (<section data-testid='splitbasket-GHSBasketSummary' aria-label='Groceries products'> > ul > <li data-testid='product-list-item'>): a fourth item markup, named from the h3 title link (then the image alt). Its +/- buttons are the ddsweb data-auto pair (already covered); the count is an <input type=number data-auto='ddsweb-quantity-controls-input'> (quantity — note an input reports its type, 'number', on appear/click; the count itself surfaces as a form_change event with eV = the typed value when the shopper types one, while +/- set the value programmatically and fire no change event, so after a +/- click the count is known from the button's aria-label and the line total); the remove X is the item's only icon button WITHOUT a data-auto (remove_item; title/aria-label 'remove <product> from trolley'); the line total is the <p> after the 'Total:' label in the div that follows .ddsweb-buybox__container (line_price = '£31.60' — structural, the wrapper classes are hashed); the per-item checkboxes are typed by their name attribute (note_checkbox = pickerNote, substitutions_checkbox = allowSubstitutions, plus the section-level #subs-checkbox; each is rendered twice — full and short label — with the same id, one hidden by CSS, so expect at most one visible instance's events); save_for_later = the link-button whose aria-label starts 'Save for later'. Elements outside an item (the subs toggle, 'More info', 'Book a slot') group under the section's aria-label, sg groceries_products. The section's primary CTA <a data-testid='checkout-button-GHSBasketSummary'> ('Book a slot', the first step of the groceries checkout) is typed checkout_link alongside the mini basket's Checkout link, so one targetAction covers both routes. Not covered: the star rating (svg-only, no text to emit) and any grid-tile promotion slot not seen in the sample — if Clubcard prices there render as a ddsweb value bar they are already caught by the value-bar entries; otherwise add a selector once seen. With the sg rules active each of these events carries its product's name as sg and the entry's type as eT. Verify selectors against the live DOM before shipping (they are the site's markup, not ours).",
+  "tracking": {
+    "semanticGroupRules": [
+      {
+        "container": "[data-testid^='product-'][data-product-id]",
+        "name": [
+          { "source": "self", "attribute": "aria-label" },
+          { "source": "h2 a[href*='/products/']" },
+          { "source": "self", "attribute": "data-testid" }
+        ],
+        "mode": "first"
+      },
+      {
+        "container": "li[data-testid]:has(.online-components-product-tile-product-heading__heading)",
+        "name": [
+          { "source": ".online-components-product-tile-product-heading__heading a" },
+          { "source": "h2 a[href*='/products/']" },
+          { "source": "self", "attribute": "data-testid" }
+        ],
+        "mode": "first"
+      },
+      {
+        "container": "div:has(> div > div > h2.online-components-product-tile-product-heading__heading)",
+        "name": [
+          { "source": ".online-components-product-tile-product-heading__heading a" },
+          { "source": "h2 a[href*='/products/']" }
+        ],
+        "mode": "first"
+      },
+      {
+        "container": "li[data-auto='mini-trolley-content-item']",
+        "name": [
+          { "source": "[data-auto='mini-tile-title'] h4" },
+          { "source": "[data-auto='mini-tile-title']" },
+          { "source": "self", "attribute": "data-product-id" }
+        ],
+        "mode": "first"
+      },
+      {
+        "container": "li[data-testid='product-list-item']",
+        "name": [
+          { "source": "h3 a[href*='/products/']" },
+          { "source": "img[data-testid^='imageElement_']", "attribute": "alt" }
+        ],
+        "mode": "first"
+      },
+      {
+        "container": "section[data-testid^='splitbasket-']",
+        "name": [{ "source": "self", "attribute": "aria-label" }],
+        "mode": "first"
+      },
+      {
+        "container": "[aria-label='Basket Summary']",
+        "name": [{ "source": "self", "attribute": "aria-label" }],
+        "mode": "first"
+      },
+      {
+        "container": "a[data-testid='Guide Price Grid']",
+        "name": [{ "source": "self", "attribute": "data-testid" }],
+        "mode": "first"
+      }
+    ],
+    "additionalTrackedElements": [
+      {
+        "selector": ".ddsweb-price__container > p:first-of-type",
+        "type": "price_retail"
+      },
+      {
+        "selector": ".ddsweb-price__container > p:nth-of-type(2)",
+        "type": "price_unit"
+      },
+      {
+        "selector": "p.online-components-product-tile-price__text",
+        "type": "price_retail"
+      },
+      {
+        "selector": "p.online-components-product-tile-unit-price__subtext",
+        "type": "price_unit"
+      },
+      {
+        "selector": "[data-testid='value-bar'] .ddsweb-value-bar__content-text",
+        "type": "price_promo"
+      },
+      {
+        "selector": "[data-testid='value-bar'] .ddsweb-value-bar__terms",
+        "type": "promo_terms"
+      },
+      { "selector": "span.ddsweb-tag__container", "type": "badge" },
+      { "selector": ".tile-delivery-message p", "type": "delivery_message" },
+      {
+        "selector": "p.online-components-product-tile-fulfillment-message__fulfillment-message",
+        "type": "delivery_message"
+      },
+      {
+        "selector": "button[data-auto='ddsweb-quantity-controls-add-button'], button.online-components-product-tile-buybox-increment-button__button, button[data-auto='icon-plus']",
+        "type": "quantity_add"
+      },
+      {
+        "selector": "button[data-auto='ddsweb-quantity-controls-remove-button'], button.online-components-product-tile-buybox-decrement-button__button, button[data-auto='icon-minus']",
+        "type": "quantity_remove"
+      },
+      {
+        "selector": ".ddsweb-quantity-controls__subtext, span.online-components-product-tile-buybox-quantity__label, output[data-auto='trolley-product-quantity'] h5, input[data-auto='ddsweb-quantity-controls-input']",
+        "type": "quantity"
+      },
+      {
+        "selector": "button[data-auto='remove-item'], li[data-testid='product-list-item'] button.ddsweb-button--icon-button:not([data-auto])",
+        "type": "remove_item"
+      },
+      {
+        "selector": "h5[data-testid='calculated-price'], li[data-testid='product-list-item'] .ddsweb-buybox__container + div > p:last-of-type",
+        "type": "line_price"
+      },
+      {
+        "selector": "input[name='pickerNote']",
+        "type": "note_checkbox"
+      },
+      {
+        "selector": "input[name='allowSubstitutions'], input#subs-checkbox",
+        "type": "substitutions_checkbox"
+      },
+      {
+        "selector": "button[aria-label^='Save for later']",
+        "type": "save_for_later"
+      },
+      {
+        "selector": "[data-testid='Guide Price'], [data-auto='basket-guide-price'] [data-auto='price-value']",
+        "type": "basket_total"
+      },
+      {
+        "selector": "a[data-testid='Guide Price Grid'], a[data-auto='basket-icon']",
+        "type": "basket_link"
+      },
+      {
+        "selector": "a[data-testid='Guide Price Grid'] button",
+        "type": "basket_button"
+      },
+      {
+        "selector": "a[data-auto='mini-trolley-checkout'], a[data-testid^='checkout-button-']",
+        "type": "checkout_link"
+      }
+    ]
+  }
+}

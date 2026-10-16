@@ -23,6 +23,11 @@ import java.time.Instant
 /// files/moveo-events.jsonl, exported from the debug settings screen and
 /// diffed against a desktop capture by the iOS repo's Scripts/diff-events.mjs.
 ///
+/// Two seams feed it since the CSP relay: relayed event batches arrive
+/// natively via `observeRelayedPost` (AppViewModel.relayTagRequest), and the
+/// page-world `window.fetch` wrapper (moveo-event-spy.android.js → the
+/// "moveoDebug" bridge) still covers the transport's fallback path.
+///
 /// NOTE: capture lines contain whatever the tag sends — Authorization is not
 /// captured, but bodies are study data. QA artifact only; the whole file
 /// lives in the debug source set and does not exist in release builds.
@@ -74,8 +79,16 @@ object EventSpy {
         }
     }
 
-    /// One JSONL line per tag POST: capture metadata + the parsed body (kept
-    /// as parsed JSON so the diff tool and humans can read it).
+    /// Native seam: a relayed event batch that passed the relay's checks, on
+    /// its way to `url` from the page at `host` (← iOS relayTagRequest →
+    /// handleDebugSpyMessage). Same capture format as the page-world seam.
+    fun observeRelayedPost(url: String, host: String, body: String) {
+        if (!enabled) return
+        record(url = url, host = host, rawBody = body)
+    }
+
+    /// Page-world seam ("moveoDebug" bridge): `{ type: "event-post", url,
+    /// host, body }` from the fetch wrapper.
     private fun handleMessage(raw: String) {
         val msg = try {
             Json.parseToJsonElement(raw).jsonObject
@@ -84,6 +97,16 @@ object EventSpy {
         }
         if ((msg["type"] as? JsonPrimitive)?.content != "event-post") return
         val rawBody = (msg["body"] as? JsonPrimitive)?.content ?: return
+        record(
+            url = (msg["url"] as? JsonPrimitive)?.content ?: "",
+            host = (msg["host"] as? JsonPrimitive)?.content ?: "",
+            rawBody = rawBody,
+        )
+    }
+
+    /// One JSONL line per tag POST: capture metadata + the parsed body (kept
+    /// as parsed JSON so the diff tool and humans can read it).
+    private fun record(url: String, host: String, rawBody: String) {
         val parsedBody = try {
             Json.parseToJsonElement(rawBody)
         } catch (_: Exception) {
@@ -112,8 +135,8 @@ object EventSpy {
         val line = buildJsonObject {
             put("body", parsedBody)
             put("capturedAt", Instant.now().toString())
-            put("host", (msg["host"] as? JsonPrimitive)?.content ?: "")
-            put("url", (msg["url"] as? JsonPrimitive)?.content ?: "")
+            put("host", host)
+            put("url", url)
         }
         val file = captureFile ?: return
         try {

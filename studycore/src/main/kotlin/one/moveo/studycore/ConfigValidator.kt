@@ -212,7 +212,8 @@ object ConfigValidator {
             errors += "tracking.semanticGroupRules: must be an array"
             return
         }
-        if (rules.size > 20) errors += "tracking.semanticGroupRules: max 20 rules"
+        // No cap on the number of rules (per-rule limits below still apply):
+        // a site with several markups per concept needs one rule per markup.
         for ((i, r) in rules.withIndex()) {
             val at = "tracking.semanticGroupRules[$i]"
             val rule = asObject(r) ?: run {
@@ -260,7 +261,7 @@ object ConfigValidator {
             errors += "tracking.additionalTrackedElements: must be an array"
             return
         }
-        if (entries.size > 20) errors += "tracking.additionalTrackedElements: max 20 entries"
+        // No cap on the number of entries (per-entry limits below still apply).
         for ((i, e) in entries.withIndex()) {
             val at = "tracking.additionalTrackedElements[$i]"
             val entry = asObject(e) ?: run {
