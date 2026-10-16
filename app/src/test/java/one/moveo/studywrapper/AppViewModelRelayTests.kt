@@ -1,6 +1,5 @@
 package one.moveo.studywrapper
 
-import java.util.concurrent.TimeUnit
 import kotlin.time.Duration.Companion.seconds
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -233,6 +232,5 @@ class AppViewModelRelayTests {
         model.relayTagRequest(message("ip"), senderHost = SENDER) { answered.complete(it) }
         assertEquals(200, answered.await().status)
         assertEquals(1, ingestRequests.size)
-        assertTrue(server.takeRequest(0, TimeUnit.MILLISECONDS) == null || true) // drained by the dispatcher
     }
 }

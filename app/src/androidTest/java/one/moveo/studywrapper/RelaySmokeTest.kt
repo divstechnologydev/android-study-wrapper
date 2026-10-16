@@ -52,6 +52,13 @@ class RelaySmokeTest {
     private val probes = java.util.Collections.synchronizedMap(mutableMapOf<String, String>())
     private val probeArrived = java.util.Collections.synchronizedMap(mutableMapOf<String, CountDownLatch>())
 
+    /// The tag's own "I am up" signals: its `initialized` bridge post and the
+    /// IP lookup it relays at init. The probes wait for these instead of a
+    /// fixed sleep — a cold WebView (first run on a fresh AVD) needs several
+    /// seconds before the page even commits.
+    private val initialized = CountDownLatch(1)
+    private val ipRelayed = CountDownLatch(1)
+
     private val pageUrl = "https://shop.example.com/products/1"
     private val csp = "default-src 'self' 'unsafe-inline'; connect-src 'none'"
     private val html = """
@@ -122,6 +129,7 @@ class RelaySmokeTest {
                     probe(name).countDown()
                 } else {
                     bridge += type
+                    if (type == "initialized") initialized.countDown()
                 }
             }
             // The app's stand-in: records the relay traffic and replies
@@ -132,6 +140,7 @@ class RelaySmokeTest {
                 val id = json["id"]?.jsonPrimitive?.content ?: return@addWebMessageListener
                 val kind = json["kind"]?.jsonPrimitive?.content ?: "?"
                 relayed += Relayed(kind, json["body"]?.jsonPrimitive?.content ?: "", sourceOrigin.host.orEmpty())
+                if (kind == "ip") ipRelayed.countDown()
                 val body = if (kind == "ip") """{"ip":"203.0.113.9"}""" else "{}"
                 main.postDelayed({
                     replyProxy.postMessage(one.moveo.studycore.TagRelay.Reply(ok = true, status = 200, body = body).toMessage(id))
@@ -163,8 +172,14 @@ class RelaySmokeTest {
             return probes.getValue(name)
         }
 
-        // Let the tag initialise (IP lookup + start_session go out at init).
-        Thread.sleep(2_500)
+        // Let the tag initialise (IP lookup + start_session go out at init):
+        // wait for its signals, not the clock — WebView start-up on a cold
+        // device is slower than any fixed sleep that is still a smoke test.
+        assertTrue("tag never posted `initialized`", initialized.await(30, TimeUnit.SECONDS))
+        assertTrue("ip lookup never relayed", ipRelayed.await(30, TimeUnit.SECONDS))
+        // The stand-in answers the lookup 50 ms later; let the tag record the
+        // IP before the clicks whose events must carry it.
+        Thread.sleep(500)
 
         val direct = runProbe("direct", "fetch('https://api.moveo.one/api/my-ip').then(function (r) { return 'reached ' + r.status; }, function (e) { return 'blocked: ' + e.message; })")
         assertTrue("direct page-world fetch is refused by the page CSP: $direct", direct.startsWith("blocked"))
