@@ -118,16 +118,11 @@ data class StudyConfig(
     )
 
     /// Where the study browser starts: the first tracked origin, at
-    /// `flow.prepositionPath` when the study declares one, else the root.
-    /// A missing leading "/" is tolerated (config authors will forget it).
+    /// `flow.prepositionPath` when the study declares one, else the root
+    /// (`StartUrl.build` — shared semantics with the extension's consent
+    /// redirect; the result is always https on the first origin).
     val startUrl: String?
-        get() {
-            val origin = tracking.origins.firstOrNull() ?: return null
-            var path = flow.prepositionPath ?: "/"
-            if (path.isEmpty()) path = "/"
-            if (!path.startsWith("/")) path = "/$path"
-            return "https://$origin$path"
-        }
+        get() = StartUrl.build(origins = tracking.origins, prepositionPath = flow.prepositionPath)
 }
 
 /// A validated target action. Unknown types never reach here — the validator

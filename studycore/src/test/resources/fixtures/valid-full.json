@@ -33,6 +33,7 @@
   "flow": {
     "leadInUrl": "https://forms.example.com/intro",
     "leadOutUrl": "https://forms.example.com/exit",
+    "prepositionPath": "/gol-ui/groceries/meat-and-fish?ref=study",
     "targetAction": {
       "type": "url_match",
       "pattern": "/checkout/success"

@@ -238,6 +238,19 @@ there is no longer a cap of 20 on `semanticGroupRules` /
 config (21 force-tracked entries — the validator test suite uses it as the
 cap-removal fixture).
 
+**`flow.prepositionPath`** (wrapper-first; now also in the extension's
+consent redirect, extension commit `a099d26` "preposition fix"): the
+validator and `StartUrl.build` (`studycore/StartUrl.kt`) are ports of the
+extension's `validate-config.js` / `src/start-url.js`. A path on the first
+origin, never a URL — max 500 chars, no scheme, no `//host`, no `\`, no
+whitespace/control characters (rejected as `invalid_config`; vendored
+fixtures `invalid-preposition-path-url.json` /
+`valid-preposition-path-empty.json`). Null/blank ⇒ the origin root. At use
+time the start URL can only ever be https on the first origin: a missing
+leading `/` is tolerated, `..` cannot escape, and anything off-origin or
+unparsable falls back to the root. `StudyConfig.startUrl` (what the study
+browser opens on) is that builder.
+
 ## Finishing a study
 
 Parity with the extension's and iOS's `done-finish` branches
