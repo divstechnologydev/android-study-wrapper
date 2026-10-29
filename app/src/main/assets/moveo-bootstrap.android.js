@@ -4,7 +4,9 @@
 // (phase-a2 §a2.3): reports go to the native side via the origin-scoped
 // window.moveoNative object (WebViewCompat.addWebMessageListener) instead of
 // webkit.messageHandlers:
-//   { type: "target" }                       event_match target hit
+//   { type: "target", leafId }               event_match leaf hit (positional
+//     id from the payload's flat leaf list; the native side latches it and
+//     evaluates the and/or tree — config-schema §4.3)
 //   { type: "ownTag", hostname }             site ships its own Moveo tag
 //   { type: "initialized", hostname }        tag init health ping (QA)
 //   { type: "session", sessionId }           tag's tracking-session id
@@ -216,16 +218,23 @@
    * path; buffer is REASSIGNED by the tag, hence the defineProperty trap).
    * Observation only: events are never mutated, blocked, or delayed.
    */
-  function installTargetHooks(instance, spec) {
-    var reported = false;
-    var report = function () {
-      if (reported) return; // per-page dedupe; native side is the authority
-      reported = true;
-      post({ type: "target" });
+  function installTargetHooks(instance, leaves) {
+    // Per-page, per-leaf dedupe; the native side is the authority (it latches
+    // each leaf once and evaluates the and/or tree — no tree logic here).
+    var reported = {};
+    var reportedCount = 0;
+    var report = function (leafId) {
+      reported[leafId] = true;
+      reportedCount++;
+      post({ type: "target", leafId: leafId });
     };
     var evaluate = function (event) {
       try {
-        if (!reported && event && matchesEvent(event.prop, spec)) report();
+        if (!event || reportedCount === leaves.length) return;
+        for (var i = 0; i < leaves.length; i++) {
+          var leaf = leaves[i];
+          if (!reported[leaf.id] && matchesEvent(event.prop, leaf.props)) report(leaf.id);
+        }
       } catch (e) {
         // Matching must never disturb the tag pipeline.
       }
@@ -258,8 +267,9 @@
     // Early-event compensation: the page-navigation / existing-session
     // branches emit page_view (and viewport_size) SYNCHRONOUSLY inside
     // init(), before these hooks exist. Evaluate a synthetic page_view once
-    // per load so eA:"page_view" targets still work. eID deliberately absent
-    // (fails closed), path in BOTH eV and sc — same as the extension.
+    // per load (against every leaf) so eA:"page_view" leaves still work. eID
+    // deliberately absent (fails closed), path in BOTH eV and sc — same as
+    // the extension.
     var path = location.pathname && location.pathname.trim() ? location.pathname : "unknown";
     evaluate({ prop: { sg: "global", eA: "page_view", eT: "page", eV: path, sc: path } });
   }
@@ -340,8 +350,17 @@
   // cannot be inlined as JSON, and this is the only init we own.
   var options = Object.assign({}, __MOVEO_PAYLOAD__.options, { transport: relayTransport });
   var instance = realInit.call(window.MoveoOne, __MOVEO_PAYLOAD__.token, options);
-  if (instance && __MOVEO_PAYLOAD__.targetAction && __MOVEO_PAYLOAD__.targetAction.props) {
-    installTargetHooks(instance, __MOVEO_PAYLOAD__.targetAction.props);
+  // Flat list of unfired event_match leaves { id, props } (the native side
+  // walked the tree — ScriptBuilder); shape-check before trusting it.
+  var rawLeaves =
+    __MOVEO_PAYLOAD__.targetAction && Array.isArray(__MOVEO_PAYLOAD__.targetAction.leaves)
+      ? __MOVEO_PAYLOAD__.targetAction.leaves
+      : [];
+  var leaves = rawLeaves.filter(function (leaf) {
+    return leaf && typeof leaf.id === "string" && leaf.props !== null && typeof leaf.props === "object";
+  });
+  if (instance && leaves.length) {
+    installTargetHooks(instance, leaves);
   }
   if (instance) {
     installFlushBridge(instance);

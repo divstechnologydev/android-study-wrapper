@@ -19,6 +19,7 @@ import kotlinx.serialization.json.jsonPrimitive
 import one.moveo.studycore.ConfigValidator
 import one.moveo.studycore.Origins
 import one.moveo.studycore.ScriptBuilder
+import one.moveo.studycore.TargetMatch
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -107,7 +108,8 @@ class RelaySmokeTest {
         )
         val script = ScriptBuilder.userScriptSource(
             config = config, tagSource = tag, bootstrapSource = bootstrap,
-            yieldHosts = emptyList(), includeEventTarget = true,
+            yieldHosts = emptyList(),
+            eventLeaves = TargetMatch.unfiredEventLeaves(config.flow.targetAction, emptySet()),
         )
         val rules = Origins.allowedOriginRules(config.tracking.origins).toSet()
         val main = Handler(Looper.getMainLooper())

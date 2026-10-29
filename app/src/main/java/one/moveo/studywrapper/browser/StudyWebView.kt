@@ -158,7 +158,7 @@ class StudyWebViewController(
     @SuppressLint("RequiresFeature") // see installUserScripts
     private fun installBridge(webView: WebView) {
         val rules = allowedOriginRules() ?: return
-        WebViewCompat.addWebMessageListener(webView, "moveoNative", rules) { _, message, _, _, _ ->
+        WebViewCompat.addWebMessageListener(webView, "moveoNative", rules) { view, message, sourceOrigin, isMainFrame, _ ->
             val data = message.data ?: return@addWebMessageListener
             val body = try {
                 Json.parseToJsonElement(data).jsonObject.mapValues { (_, v) ->
@@ -171,7 +171,17 @@ class StudyWebViewController(
             // Completion flush answered (the model still gets the message
             // for its debug log line).
             if (type == "flushed") flushResult?.complete(Unit)
-            model.handleBridgeMessage(type = type, body = body)
+            // Sender identity comes from the engine, never the message: the
+            // posting frame's origin host, and — for the main frame only —
+            // its URL (there is no trusted per-frame URL for subframes, so
+            // those latch event leaves but never url leaves). The iOS
+            // `senderURL` / extension `sender.url` analogue.
+            model.handleBridgeMessage(
+                type = type,
+                body = body,
+                senderHost = sourceOrigin.host,
+                senderUrl = if (isMainFrame) view.url else null,
+            )
         }
         installRelay(webView, rules)
         // M5 parity capture: separate "moveoDebug" listener, same origin

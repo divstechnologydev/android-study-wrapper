@@ -292,8 +292,13 @@ Flow invariants to preserve exactly:
 allowedOriginRules, listener)` — same origin rules as injection, so the
 bridge object doesn't even exist off-study. Message handling ports
 `handleBridgeMessage`:
-- `{type:"target"}` — event_match target hit (native side is the authority,
-  once per study).
+- `{type:"target", leafId}` — event_match leaf hit, named by its positional
+  id (§4.3). The native side is the authority: it shape-checks the id,
+  resolves it against the current tree (event leaves only; the sender frame
+  must sit on a study origin), latches it into `targetProgress`, and fires
+  the target once the and/or tree evaluates true — once per study. url
+  leaves latch from the native URL feed and from the sender's main-frame
+  URL.
 - `{type:"ownTag", hostname}` — record in `ownTagHosts`, re-apply the script
   (yield from next load on that host).
 - `{type:"initialized", hostname}` — debug-build health surface only.
