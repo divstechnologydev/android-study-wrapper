@@ -16,10 +16,12 @@ class ScriptBuilderTests {
         tag: String = "/*TAG*/",
         bootstrap: String = "/*BOOTSTRAP*/",
         yieldHosts: List<String> = emptyList(),
-        includeEventTarget: Boolean = false,
+        eventLeaves: List<TargetMatch.TargetLeaf>? = null,
     ): String = ScriptBuilder.userScriptSource(
         config = config, tagSource = tag, bootstrapSource = bootstrap,
-        yieldHosts = yieldHosts, includeEventTarget = includeEventTarget,
+        yieldHosts = yieldHosts,
+        // Default: everything unfired — what a fresh enrollment injects.
+        eventLeaves = eventLeaves ?: TargetMatch.unfiredEventLeaves(config.flow.targetAction, emptySet()),
     )
 
     @Test
@@ -74,21 +76,47 @@ class ScriptBuilderTests {
     }
 
     @Test
-    fun eventTargetIncludedOnlyWhileUnfired() {
+    fun eventLeavesIncludedOnlyWhileUnfired() {
+        // Single event leaf at the root (the pre-composite form) keeps id "t".
         val eventConfig = config(name = "valid-event-match.json")
-        val unfired = build(eventConfig, includeEventTarget = true)
-        assertTrue(unfired.contains("\"targetAction\""))
-        assertTrue(unfired.contains("\"type\":\"event_match\""))
+        val unfired = build(eventConfig)
+        assertTrue(unfired, unfired.contains("\"targetAction\":{\"leaves\":[{\"id\":\"t\",\"props\":{"))
+        assertFalse("the page gets leaves, never node types", unfired.contains("event_match"))
 
-        val fired = build(eventConfig, includeEventTarget = false)
+        val fired = build(eventConfig, eventLeaves = emptyList())
         assertFalse("omitted once fired — zero matching overhead", fired.contains("targetAction"))
+    }
+
+    @Test
+    fun compositeTreeSendsOnlyUnfiredEventLeavesWithPositionalIds() {
+        // and[url_match, or[event_match, event_match]] — the bridge's
+        // collectEventLeaves shape: flat { leaves: [{ id, props }] }.
+        val nested = config(name = "valid-composite-nested.json")
+        val source = build(nested)
+        assertTrue(source, source.contains("\"targetAction\":{\"leaves\":[{\"id\":\"t.1.0\",\"props\":{"))
+        assertTrue(source.contains("{\"id\":\"t.1.1\",\"props\":{"))
+        assertFalse("the url leaf never reaches the page", source.contains("t.0\""))
+        assertFalse(source.contains("url_match"))
+        assertFalse("the tree never reaches the page", source.contains("conditions"))
+
+        // One leaf latched ⇒ only the other one is sent.
+        val partial = build(nested, eventLeaves = TargetMatch.unfiredEventLeaves(nested.flow.targetAction, setOf("t.1.0")))
+        assertFalse(partial.contains("\"id\":\"t.1.0\""))
+        assertTrue(partial.contains("\"id\":\"t.1.1\""))
+
+        // Every event leaf latched (url leaf still pending) ⇒ nothing for the page.
+        val drained = build(nested, eventLeaves = TargetMatch.unfiredEventLeaves(nested.flow.targetAction, setOf("t.1.0", "t.1.1")))
+        assertFalse(drained.contains("targetAction"))
     }
 
     @Test
     fun urlMatchTargetNeverReachesThePage() {
         // valid-full has a url_match target — evaluated natively, not in JS.
-        val source = build(config(), includeEventTarget = true)
+        val source = build(config())
         assertFalse(source.contains("targetAction"))
+        // Even a url leaf passed in by mistake is dropped by the encoder.
+        val forced = build(config(), eventLeaves = listOf(TargetMatch.TargetLeaf.Url(id = "t", pattern = "/checkout")))
+        assertFalse(forced.contains("targetAction"))
     }
 
     @Test

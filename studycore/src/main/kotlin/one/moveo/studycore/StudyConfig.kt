@@ -9,6 +9,7 @@ import kotlinx.serialization.descriptors.buildClassSerialDescriptor
 import kotlinx.serialization.encoding.Decoder
 import kotlinx.serialization.encoding.Encoder
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonDecoder
 import kotlinx.serialization.json.JsonEncoder
 import kotlinx.serialization.json.JsonObject
@@ -125,8 +126,12 @@ data class StudyConfig(
         get() = StartUrl.build(origins = tracking.origins, prepositionPath = flow.prepositionPath)
 }
 
-/// A validated target action. Unknown types never reach here — the validator
-/// normalizes them to null ("proceed as if absent", forward compatibility).
+/// A validated target action (config-schema §4.1–4.3): a tree whose leaves
+/// are `UrlMatch` / `EventMatch` and whose composites are `And` / `Or` over
+/// 1–10 children. A single leaf at the root is the degenerate tree every
+/// pre-composite config is. Unknown types never reach here — the validator
+/// normalizes a tree containing one to null ("proceed as if absent", forward
+/// compatibility).
 @Serializable(with = TargetActionSerializer::class)
 sealed class TargetAction {
     /// Substring/`*`-wildcard pattern matched against the full URL.
@@ -134,34 +139,53 @@ sealed class TargetAction {
 
     /// AND-matched property bag over the closed key set eA/eT/eID/eV/sg/sc.
     data class EventMatch(val props: Map<String, String>) : TargetAction()
+
+    /// Every child must have latched.
+    data class And(val conditions: List<TargetAction>) : TargetAction()
+
+    /// At least one child must have latched.
+    data class Or(val conditions: List<TargetAction>) : TargetAction()
 }
 
 /// Encodes as `{"type":"url_match","pattern":…}` / `{"type":"event_match",
-/// "props":{…}}` — the same wire shape as the config JSON and iOS Codable.
+/// "props":{…}}` / `{"type":"and"|"or","conditions":[…]}` — the same wire
+/// shape as the config JSON and iOS Codable.
 object TargetActionSerializer : KSerializer<TargetAction> {
     override val descriptor: SerialDescriptor = buildClassSerialDescriptor("one.moveo.studycore.TargetAction")
 
     override fun serialize(encoder: Encoder, value: TargetAction) {
         val jsonEncoder = encoder as? JsonEncoder
             ?: throw SerializationException("TargetAction supports JSON only")
-        val obj = when (value) {
-            is TargetAction.UrlMatch -> buildJsonObject {
-                put("type", "url_match")
-                put("pattern", value.pattern)
-            }
-            is TargetAction.EventMatch -> buildJsonObject {
-                put("type", "event_match")
-                put("props", JsonObject(value.props.mapValues { JsonPrimitive(it.value) }))
-            }
+        jsonEncoder.encodeJsonElement(toJson(value))
+    }
+
+    private fun toJson(value: TargetAction): JsonObject = when (value) {
+        is TargetAction.UrlMatch -> buildJsonObject {
+            put("type", "url_match")
+            put("pattern", value.pattern)
         }
-        jsonEncoder.encodeJsonElement(obj)
+        is TargetAction.EventMatch -> buildJsonObject {
+            put("type", "event_match")
+            put("props", JsonObject(value.props.mapValues { JsonPrimitive(it.value) }))
+        }
+        is TargetAction.And -> buildJsonObject {
+            put("type", "and")
+            put("conditions", JsonArray(value.conditions.map { toJson(it) }))
+        }
+        is TargetAction.Or -> buildJsonObject {
+            put("type", "or")
+            put("conditions", JsonArray(value.conditions.map { toJson(it) }))
+        }
     }
 
     override fun deserialize(decoder: Decoder): TargetAction {
         val jsonDecoder = decoder as? JsonDecoder
             ?: throw SerializationException("TargetAction supports JSON only")
-        val obj = jsonDecoder.decodeJsonElement().jsonObject
-        return when (val type = obj["type"]?.jsonPrimitive?.content) {
+        return fromJson(jsonDecoder.decodeJsonElement().jsonObject)
+    }
+
+    private fun fromJson(obj: JsonObject): TargetAction =
+        when (val type = obj["type"]?.jsonPrimitive?.content) {
             "url_match" -> TargetAction.UrlMatch(
                 pattern = obj["pattern"]?.jsonPrimitive?.content
                     ?: throw SerializationException("url_match without pattern"),
@@ -170,9 +194,14 @@ object TargetActionSerializer : KSerializer<TargetAction> {
                 props = obj["props"]?.jsonObject?.mapValues { it.value.jsonPrimitive.content }
                     ?: throw SerializationException("event_match without props"),
             )
+            "and", "or" -> {
+                val conditions = (obj["conditions"] as? JsonArray)
+                    ?: throw SerializationException("$type without conditions")
+                val children = conditions.map { fromJson(it.jsonObject) }
+                if (type == "and") TargetAction.And(children) else TargetAction.Or(children)
+            }
             else -> throw SerializationException(
                 "unknown targetAction type $type — the validator should have dropped it"
             )
         }
-    }
 }

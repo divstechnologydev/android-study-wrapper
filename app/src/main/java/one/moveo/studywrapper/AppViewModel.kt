@@ -34,7 +34,6 @@ import one.moveo.studycore.SetupLink
 import one.moveo.studycore.StudyConfig
 import one.moveo.studycore.StudyStore
 import one.moveo.studycore.TagRelay
-import one.moveo.studycore.TargetAction
 import one.moveo.studycore.TargetMatch
 import one.moveo.studycore.generated.TagEndpoint
 import one.moveo.studywrapper.browser.BrowserProxy
@@ -515,7 +514,17 @@ class AppViewModel(
                 if (fresh.study.status == StudyConfig.Status.ENDED) {
                     endStudy(study, revoked = false)
                 } else if (fresh != study.config) {
-                    val updated = study.copy(config = fresh)
+                    // Leaf ids in targetProgress are positional paths into the
+                    // targetAction tree (§4.3): if the author re-shapes the
+                    // tree, a latched "t.1" could pre-satisfy a different
+                    // condition (fail-open). Reset progress when the target
+                    // definition changes; targetFired is deliberately kept —
+                    // a reached target stays reached (extension applyNewConfig).
+                    val targetChanged = fresh.flow.targetAction != study.config.flow.targetAction
+                    val updated = study.copy(
+                        config = fresh,
+                        targetProgress = if (targetChanged) null else study.targetProgress,
+                    )
                     store.activeStudy = updated
                     _activeStudy.value = updated
                     refreshUserScript()
@@ -593,14 +602,21 @@ class AppViewModel(
         if (study.isDemo) return null
         val tag = assetLoader("moveo-one.js") ?: return null
         val bootstrap = assetLoader("moveo-bootstrap.android.js") ?: return null
-        val includeEventTarget =
-            study.config.flow.targetAction is TargetAction.EventMatch && !study.targetFired
+        // event_match leaves still to be latched (config-schema §4.3): the
+        // tree never reaches the page — only a flat list of unfired event
+        // leaves with their ids, and nothing once the target has fired
+        // (extension bridge: collectEventLeaves filtered by targetProgress).
+        val eventLeaves = if (study.targetFired) {
+            emptyList()
+        } else {
+            TargetMatch.unfiredEventLeaves(study.config.flow.targetAction, study.latchedLeafIds)
+        }
         return ScriptBuilder.userScriptSource(
             config = study.config,
             tagSource = tag,
             bootstrapSource = bootstrap,
             yieldHosts = store.ownTagHosts.keys.toList(),
-            includeEventTarget = includeEventTarget,
+            eventLeaves = eventLeaves,
         )
     }
 
@@ -673,27 +689,76 @@ class AppViewModel(
             }
         }
 
-        // url_match target (§4.2.2) — evaluated natively on every URL change
-        // (doUpdateVisitedHistory catches pushState too). event_match arrives
-        // via the bridge.
-        val target = study.config.flow.targetAction
-        if (!study.targetFired && target is TargetAction.UrlMatch &&
-            TargetMatch.matchesUrl(url, target.pattern)
-        ) {
-            targetReached(study)
+        // url_match leaves (§4.1, §4.3) — evaluated natively on every URL
+        // change (doUpdateVisitedHistory catches pushState too). event_match
+        // leaves arrive via the bridge.
+        if (study.targetFired || study.config.flow.targetAction == null) return
+        latchUrlLeaves(study.code, url)
+    }
+
+    /// Latch every unfired url_match leaf the URL matches (extension
+    /// target-service `latchUrlLeaves` / `evaluateUrlLeaves`). Also called
+    /// with the sender frame's URL when an event leaf reports, so an
+    /// and(url, event) tree does not wait for a navigation that never comes
+    /// when the participant is already on the matching page. Each hit is
+    /// re-checked by the single writer; the study is re-read per leaf since
+    /// a latch may fire the target (and complete the study) mid-loop.
+    private fun latchUrlLeaves(code: String, url: String) {
+        val scheme = try {
+            java.net.URI(url).scheme?.lowercase()
+        } catch (_: Exception) {
+            null
+        } ?: return
+        if (scheme != "http" && scheme != "https") return
+        val study = store.activeStudy?.takeIf { it.code == code && !it.targetFired } ?: return
+        val progress = study.latchedLeafIds
+        val hits = TargetMatch.flatten(study.config.flow.targetAction).mapNotNull { leaf ->
+            (leaf as? TargetMatch.TargetLeaf.Url)
+                ?.takeIf { it.id !in progress && TargetMatch.matchesUrl(url, it.pattern) }
+                ?.id
+        }
+        for (leafId in hits) {
+            if (store.activeStudy?.targetFired != false) return
+            targetLeafReached(code, leafId, expected = LeafKind.URL)
         }
     }
 
     // MARK: - Bridge (a2.4)
 
-    fun handleBridgeMessage(type: String, body: Map<String, String?>) {
+    /// `senderHost` is the posting frame's origin host as the WebView reports
+    /// it (the WebMessageListener's `sourceOrigin`) and `senderUrl` the
+    /// frame's URL when known (the main frame's `WebView.url`; null for
+    /// subframes) — both set by the engine, never by the page (the
+    /// extension's `sender.url`). Only the "target" message consults them.
+    fun handleBridgeMessage(
+        type: String,
+        body: Map<String, String?>,
+        senderHost: String? = null,
+        senderUrl: String? = null,
+    ) {
         // Debug-only observability (null sink in release): type + hostname,
         // never event payloads.
         debugLog?.invoke("bridge: $type ${body["hostname"] ?: ""}")
         when (type) {
             "target" -> {
-                val study = store.activeStudy ?: return
-                if (!study.targetFired) targetReached(study)
+                // An event_match leaf hit in the page, identified by its
+                // positional leaf id (extension TARGET_REACHED). The page can
+                // spoof this — same trust class as ownTag — but the impact is
+                // bounded: the id is shape-checked (bridge rule), resolved
+                // against the CURRENT tree and must name an event leaf; the
+                // sender frame must sit on a study origin (the bridge object
+                // only exists there to begin with); and completion truth
+                // lives in the analytics stream, so a spoof can at worst open
+                // the participant's own lead-out early. The url leaves are
+                // then evaluated against the sender's URL so an and(url,
+                // event) tree fires when the participant is already on the
+                // matching page.
+                val leafId = body["leafId"]?.takeIf { TargetMatch.isValidLeafId(it) } ?: return
+                val study = store.activeStudy?.takeIf { !it.targetFired } ?: return
+                val host = senderHost?.takeIf { it.isNotEmpty() } ?: return
+                if (!Origins.hostnameMatches(host, study.config.tracking.origins)) return
+                targetLeafReached(study.code, leafId, expected = LeafKind.EVENT)
+                senderUrl?.let { latchUrlLeaves(study.code, it) }
             }
             "ownTag" -> {
                 val hostname = body["hostname"]?.lowercase()?.takeIf { it.isNotEmpty() } ?: return
@@ -740,14 +805,47 @@ class AppViewModel(
     private val leadOutDelayMillis = (FlowConstants.LEAD_OUT_DELAY_SECONDS * 1000).toLong()
     private val completionFlushTimeoutMillis = (FlowConstants.COMPLETION_FLUSH_TIMEOUT_SECONDS * 1000).toLong()
 
-    /// Marks the target once per participant per study, schedules the
-    /// lead-out. `leadOutDueAt` is persisted BEFORE the timer so an app kill
-    /// inside the delay self-heals on next launch; `leadOutShownAt` is only
-    /// written after the Custom Tab actually launches — lost lead-outs
-    /// self-heal, shown ones never repeat. Reaching the target completes the
-    /// study (extension `handleTargetReached`): via the lead-out when there
-    /// is one, otherwise right here.
-    private fun targetReached(study: ActiveStudy) {
+    /// Which kind of leaf a report may latch — a page report can never
+    /// claim a url leaf, and the native URL feed never claims an event leaf.
+    private enum class LeafKind { URL, EVENT }
+
+    /// Single writer for targetProgress and targetFired (extension
+    /// `handleTargetLeafReached`). Safe to call redundantly — duplicate
+    /// reports, racing url/event matchers and stale pages all collapse on
+    /// the re-check. `leafId` is untrusted (it may come from the page): it
+    /// is resolved against the current tree and must be a leaf of
+    /// `expected`, so a page can neither invent ids nor claim a url leaf. A
+    /// report naming the root ("t") on a composite tree resolves to no leaf
+    /// and is dropped. Latching the last needed leaf fires the target —
+    /// progress and targetFired go out in ONE write.
+    private fun targetLeafReached(code: String, leafId: String, expected: LeafKind) {
+        val study = store.activeStudy?.takeIf { it.code == code && !it.targetFired } ?: return
+        val leaf = TargetMatch.findLeaf(study.config.flow.targetAction, leafId) ?: return
+        val kind = if (leaf is TargetMatch.TargetLeaf.Url) LeafKind.URL else LeafKind.EVENT
+        if (kind != expected) return
+        val progress = study.targetProgress ?: emptyMap()
+        if (progress.containsKey(leaf.id)) return // already latched
+        val updated = study.copy(targetProgress = progress + (leaf.id to now()))
+
+        if (TargetMatch.evaluate(updated.config.flow.targetAction, updated.latchedLeafIds)) {
+            fireTarget(updated)
+        } else {
+            store.activeStudy = updated
+            _activeStudy.value = updated
+            // The latched event leaf is dropped from the next page load (the
+            // extension bridge filters by targetProgress per load).
+            refreshUserScript()
+        }
+    }
+
+    /// The target is reached: marks it once per participant per study and
+    /// schedules the lead-out. `leadOutDueAt` is persisted BEFORE the timer
+    /// so an app kill inside the delay self-heals on next launch;
+    /// `leadOutShownAt` is only written after the Custom Tab actually
+    /// launches — lost lead-outs self-heal, shown ones never repeat. Reaching
+    /// the target completes the study (extension `fireTarget`): via the
+    /// lead-out when there is one, otherwise right here.
+    private fun fireTarget(study: ActiveStudy) {
         val firedAt = now()
         var updated = study.copy(targetFired = true, targetFiredAt = firedAt)
         val hasLeadOut = updated.config.flow.leadOutUrl != null && updated.leadOutShownAt == null
@@ -756,7 +854,7 @@ class AppViewModel(
         }
         store.activeStudy = updated
         _activeStudy.value = updated
-        refreshUserScript() // drops the event_match spec from future loads
+        refreshUserScript() // drops the event leaves from future loads
         if (hasLeadOut) {
             scope.launch {
                 delay(leadOutDelayMillis)

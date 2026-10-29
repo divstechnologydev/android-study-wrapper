@@ -19,9 +19,10 @@ class FixtureVendoringTests {
     @Test
     fun fixtureSuiteVendored() {
         val files = Fixtures.dir().listFiles { f -> f.extension == "json" }!!.toList()
-        assertTrue("expected the full fixture suite", files.size >= 20)
+        assertTrue("expected the full fixture suite (incl. the composite-target set)", files.size >= 30)
         assertTrue(files.any { it.name == "valid-full.json" })
         assertTrue(files.any { it.name == "invalid-missing-token.json" })
+        assertTrue(files.any { it.name == "valid-composite-nested.json" })
     }
 
     @Test
