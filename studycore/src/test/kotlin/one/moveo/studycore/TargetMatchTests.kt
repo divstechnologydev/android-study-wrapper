@@ -2,6 +2,8 @@ package one.moveo.studycore
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /// Port of the extension's target-matching case table (run-tests.mjs §6, via
@@ -119,6 +121,116 @@ class TargetMatchTests {
         assertFalse(TargetMatch.matchesEvent(click, mapOf("eA" to 42)))
         assertFalse(TargetMatch.matchesEvent(click, mapOf("eA" to "")))
         assertFalse(TargetMatch.matchesEvent(click, null))
+    }
+
+    // MARK: - Composite targets (run-tests.mjs §6b: flatten / evaluate / findLeaf)
+    //
+    // The extension's "unknown node type" cases (flatten contributes nothing,
+    // evaluate ⇒ false, or-with-unknown-sibling) are unrepresentable here:
+    // the typed TargetAction has no unknown case because the validator nulls
+    // the whole tree (ConfigValidatorTests pins that side of the contract).
+
+    private val tUrl = TargetAction.UrlMatch(pattern = "/checkout/*/success")
+    private val tBuy = TargetAction.EventMatch(props = mapOf("eA" to "click", "eV" to "Buy now"))
+    private val tPay = TargetAction.EventMatch(props = mapOf("eA" to "click", "eV" to "Pay now"))
+    private val tNested: TargetAction get() = TargetAction.And(listOf(tUrl, TargetAction.Or(listOf(tBuy, tPay))))
+    private val tFlatAnd: TargetAction get() = TargetAction.And(listOf(tUrl, tBuy))
+    private val tFlatOr: TargetAction get() = TargetAction.Or(listOf(tUrl, tBuy))
+
+    private fun ids(node: TargetAction?): List<String> = TargetMatch.flatten(node).map { it.id }
+    private fun ev(node: TargetAction?, fired: List<String>): Boolean = TargetMatch.evaluate(node, fired.toSet())
+
+    @Test
+    fun flattenPositionalIds() {
+        assertEquals("leaf root has id t", listOf(TargetMatch.TargetLeaf.Url(id = "t", pattern = "/checkout/*/success")), TargetMatch.flatten(tUrl))
+        assertEquals("flat and ids in order", listOf("t.0", "t.1"), ids(tFlatAnd))
+        assertEquals("nested ids", listOf("t.0", "t.1.0", "t.1.1"), ids(tNested))
+        assertEquals(
+            "event leaf carries props",
+            TargetMatch.TargetLeaf.Event(id = "t.1.0", props = mapOf("eA" to "click", "eV" to "Buy now")),
+            TargetMatch.flatten(tNested)[1],
+        )
+        assertEquals("null → []", emptyList<String>(), ids(null))
+        assertEquals("empty composite → []", emptyList<String>(), ids(TargetAction.And(emptyList())))
+    }
+
+    @Test
+    fun evaluateCaseTable() {
+        assertTrue("leaf root fires on t", ev(tUrl, listOf("t")))
+        assertFalse("leaf root, nothing fired", ev(tUrl, emptyList()))
+        assertFalse("leaf root ignores child-shaped ids", ev(tUrl, listOf("t.0")))
+        assertTrue("and — all", ev(tFlatAnd, listOf("t.0", "t.1")))
+        assertFalse("and — partial", ev(tFlatAnd, listOf("t.0")))
+        assertFalse("and — none", ev(tFlatAnd, emptyList()))
+        assertTrue("or — one", ev(tFlatOr, listOf("t.1")))
+        assertFalse("or — none", ev(tFlatOr, emptyList()))
+        assertTrue("nested — url + buy", ev(tNested, listOf("t.0", "t.1.0")))
+        assertTrue("nested — url + pay", ev(tNested, listOf("t.0", "t.1.1")))
+        assertFalse("nested — url only", ev(tNested, listOf("t.0")))
+        assertFalse("nested — both clicks, no url", ev(tNested, listOf("t.1.0", "t.1.1")))
+        assertTrue("extra/stale ids ignored", ev(tFlatAnd, listOf("t.0", "t.1", "t.9", "t")))
+        assertFalse("empty and is NOT vacuously true", ev(TargetAction.And(emptyList()), emptyList()))
+        assertFalse("empty or false", ev(TargetAction.Or(emptyList()), emptyList()))
+        assertFalse("null tree → false", ev(null, listOf("t")))
+        assertTrue("single-child composite is identity (or)", ev(TargetAction.Or(listOf(tUrl)), listOf("t.0")))
+        assertFalse("single-child composite is identity (and)", ev(TargetAction.And(listOf(tUrl)), emptyList()))
+    }
+
+    @Test
+    fun findLeaf() {
+        assertEquals(
+            "resolves nested id",
+            TargetMatch.TargetLeaf.Event(id = "t.1.1", props = mapOf("eA" to "click", "eV" to "Pay now")),
+            TargetMatch.findLeaf(tNested, "t.1.1"),
+        )
+        assertNull("root id on composite → null (legacy report dropped)", TargetMatch.findLeaf(tNested, "t"))
+        assertEquals(
+            "root id on leaf tree",
+            TargetMatch.TargetLeaf.Event(id = "t", props = mapOf("eA" to "click", "eV" to "Buy now")),
+            TargetMatch.findLeaf(tBuy, "t"),
+        )
+        for (id in listOf("__proto__", "constructor", "prototype", "", "t.", "t..0")) {
+            assertNull("prototype-ish id $id → null", TargetMatch.findLeaf(tNested, id))
+        }
+        assertNull(TargetMatch.findLeaf(null, "t"))
+    }
+
+    /// The bridge's leaf-id shape check must accept every id the validator
+    /// can produce (depth ≤ 3 ⇒ at most 3 segments, ≤ 10 children ⇒ ≤ 2
+    /// digits) and reject junk (run-tests.mjs §9b).
+    @Test
+    fun leafIdShapeCheck() {
+        for (id in listOf("t", "t.0", "t.9", "t.1.0", "t.0.9.3")) {
+            assertTrue("accepts $id", TargetMatch.isValidLeafId(id))
+        }
+        for (id in listOf("", "x", "t.", "t..0", "t.0.0.0.0", "__proto__", "t.a", "t.100", " t.0", "t.0\n")) {
+            assertFalse("rejects ${id.replace("\n", "\\n")}", TargetMatch.isValidLeafId(id))
+        }
+    }
+
+    /// What the page receives: the bridge's collectEventLeaves (event leaves
+    /// only, positional ids) minus the latched ones.
+    @Test
+    fun unfiredEventLeaves() {
+        assertEquals(
+            "url leaves never reach the page",
+            listOf(
+                TargetMatch.TargetLeaf.Event(id = "t.1.0", props = mapOf("eA" to "click", "eV" to "Buy now")),
+                TargetMatch.TargetLeaf.Event(id = "t.1.1", props = mapOf("eA" to "click", "eV" to "Pay now")),
+            ),
+            TargetMatch.unfiredEventLeaves(tNested, emptySet()),
+        )
+        assertEquals(
+            "latched leaves are filtered out",
+            listOf("t.1.1"),
+            TargetMatch.unfiredEventLeaves(tNested, setOf("t.1.0", "t.0")).map { it.id },
+        )
+        assertEquals("leaf url root → nothing for the page", emptyList<TargetMatch.TargetLeaf>(), TargetMatch.unfiredEventLeaves(tUrl, emptySet()))
+        assertEquals("leaf event root keeps id t", listOf("t"), TargetMatch.unfiredEventLeaves(tBuy, emptySet()).map { it.id })
+        assertEquals(emptyList<TargetMatch.TargetLeaf>(), TargetMatch.unfiredEventLeaves(null, emptySet()))
+        // Parity with the module definition the extension's CI pins.
+        val expected = TargetMatch.flatten(tNested).filter { it.isEvent && it.id != "t.1.0" }
+        assertEquals(expected, TargetMatch.unfiredEventLeaves(tNested, setOf("t.1.0")))
     }
 
     private data class Case4(val label: String, val url: String, val pattern: String, val expected: Boolean)

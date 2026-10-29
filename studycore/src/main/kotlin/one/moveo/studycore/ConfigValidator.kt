@@ -44,6 +44,7 @@ object ConfigValidator {
     fun validate(input: JsonElement): ValidationResult {
         val errors = mutableListOf<String>()
         var needsAppUpdate = false
+        val targetState = TargetState() // filled by validateTargetNode
 
         val obj = asObject(input)
             ?: return ValidationResult.Invalid(listOf("config must be an object"), needsAppUpdate = false)
@@ -142,7 +143,20 @@ object ConfigValidator {
                 present(f["appendParticipantId"])?.let {
                     if (!isBool(it)) errors += "flow.appendParticipantId: must be boolean"
                 }
-                present(f["targetAction"])?.let { validateTargetAction(it, errors) }
+                present(f["targetAction"])?.let { rawTa ->
+                    val ta = asObject(rawTa)
+                    if (ta != null) {
+                        validateTargetNode(ta, at = "flow.targetAction", depth = 1, state = targetState, errors = errors)
+                        if (targetState.leaves > TARGET_MAX_LEAVES) {
+                            errors += "flow.targetAction: more than $TARGET_MAX_LEAVES leaf conditions (§4.3)"
+                        }
+                    } else {
+                        errors += "flow.targetAction: must be an object or null"
+                    }
+                    // Unknown targetAction.type (anywhere in the tree): ignored
+                    // (forward compatibility, §4) — consumers proceed as if
+                    // targetAction were absent (buildTargetAction ⇒ null).
+                }
             } else {
                 errors += "flow: must be an object when present"
             }
@@ -192,7 +206,8 @@ object ConfigValidator {
                     ?.trimJs()?.takeIf { it.isNotEmpty() },
                 appendParticipantId = flowObj?.get("appendParticipantId")
                     ?.takeIf { isBool(it) }?.jsonPrimitive?.content?.toBoolean() ?: false,
-                targetAction = buildTargetAction(flowObj?.get("targetAction")), // unknown type ⇒ null (treated as absent)
+                // Unknown type anywhere in the tree ⇒ null (treated as absent).
+                targetAction = if (targetState.unknown) null else buildTargetAction(flowObj?.get("targetAction")),
             ),
         )
         return ValidationResult.Valid(config)
@@ -304,50 +319,90 @@ object ConfigValidator {
         }
     }
 
-    private fun validateTargetAction(raw: JsonElement, errors: MutableList<String>) {
-        val ta = asObject(raw) ?: run {
-            errors += "flow.targetAction: must be an object or null"
-            return
-        }
-        when (asString(ta["type"])) {
+    // flow.targetAction (§4.1–4.3): a tree whose leaves are url_match /
+    // event_match and whose composites are and / or over 1–10 `conditions`.
+    // Caps keep the tree small enough to reason about (and to serialize to
+    // the page): depth counts composite levels from the root, leaves count
+    // across the whole tree. Structural faults are errors (like a malformed
+    // leaf); an unknown `type` anywhere is NOT an error — it marks the whole
+    // targetAction for the null-out above, exactly as an unknown root type
+    // always has. Partial evaluation of a tree with an unknown leaf would
+    // hand the author a different target than the one written; "absent" is
+    // the honest outcome. Ported branch-for-branch from validate-config.js
+    // `validateTargetNode` (via iOS); error strings are byte-identical.
+    const val TARGET_MAX_CHILDREN = 10
+    const val TARGET_MAX_DEPTH = 3
+    const val TARGET_MAX_LEAVES = 10
+
+    private class TargetState(var leaves: Int = 0, var unknown: Boolean = false)
+
+    private fun validateTargetNode(
+        node: JsonObject,
+        at: String,
+        depth: Int,
+        state: TargetState,
+        errors: MutableList<String>,
+    ) {
+        when (asString(node["type"])) {
             "url_match" -> {
-                val pattern = asString(ta["pattern"])
+                state.leaves += 1
+                val pattern = asString(node["pattern"])
                 if (pattern == null || pattern.isEmpty() || pattern.length > 500) {
-                    errors += "flow.targetAction.pattern: required string (1–500 chars)"
+                    errors += "$at.pattern: required string (1–500 chars)"
                     return
                 }
                 if (TargetMatch.isPureWildcard(pattern)) {
-                    errors += "flow.targetAction.pattern: must not be wildcards only (§4.1 — would fire on the first page visited)"
+                    errors += "$at.pattern: must not be wildcards only (§4.1 — would fire on the first page visited)"
                 }
             }
             "event_match" -> {
-                val props = asObject(ta["props"]) ?: run {
-                    errors += "flow.targetAction.props: required object for event_match"
+                state.leaves += 1
+                val props = asObject(node["props"]) ?: run {
+                    errors += "$at.props: required object for event_match"
                     return
                 }
                 val keys = props.keys.sorted()
                 if (keys.size < 1 || keys.size > 10) {
-                    errors += "flow.targetAction.props: must have 1–10 keys"
+                    errors += "$at.props: must have 1–10 keys"
                 }
                 var constraining = 0
                 for (k in keys) {
                     if (k !in TargetMatch.matchableKeys) {
-                        errors += "flow.targetAction.props: unknown key ${jsonQuote(JsonPrimitive(k))} (allowed: ${TargetMatch.matchableKeys.joinToString(", ")})"
+                        errors += "$at.props: unknown key ${jsonQuote(JsonPrimitive(k))} (allowed: ${TargetMatch.matchableKeys.joinToString(", ")})"
                     } else {
                         val v = asString(props[k])
                         if (v != null && v.isNotEmpty() && v.length <= 200) {
                             if (!TargetMatch.isPureWildcard(v)) constraining += 1
                         } else {
-                            errors += "flow.targetAction.props.$k: must be a non-empty string (≤200 chars)"
+                            errors += "$at.props.$k: must be a non-empty string (≤200 chars)"
                         }
                     }
                 }
                 if (constraining == 0) {
-                    errors += "flow.targetAction.props: at least one value must not be a pure wildcard (§4.2 — an all-wildcard rule fires on the first event)"
+                    errors += "$at.props: at least one value must not be a pure wildcard (§4.2 — an all-wildcard rule fires on the first event)"
                 }
             }
-            // Unknown targetAction.type: ignored (forward compatibility, §4) —
-            // consumers proceed as if targetAction were absent.
+            "and", "or" -> {
+                if (depth > TARGET_MAX_DEPTH) {
+                    errors += "$at: nesting deeper than $TARGET_MAX_DEPTH composite levels (§4.3)"
+                    return
+                }
+                val conditions = node["conditions"] as? JsonArray
+                if (conditions == null || conditions.size < 1 || conditions.size > TARGET_MAX_CHILDREN) {
+                    errors += "$at.conditions: required non-empty array (1–$TARGET_MAX_CHILDREN) for and/or"
+                    return
+                }
+                conditions.forEachIndexed { i, child ->
+                    val cat = "$at.conditions[$i]"
+                    val childObj = asObject(child)
+                    if (childObj == null) {
+                        errors += "$cat: must be an object"
+                    } else {
+                        validateTargetNode(childObj, at = cat, depth = depth + 1, state = state, errors = errors)
+                    }
+                }
+            }
+            else -> state.unknown = true // forward compat — internals not inspected
         }
     }
 
@@ -380,9 +435,12 @@ object ConfigValidator {
         }
     }
 
+    /// Builds the typed tree from validated input. Returns null for the WHOLE
+    /// tree when any node has an unknown type — the Kotlin equivalent of the
+    /// extension's `config.flow.targetAction = null`.
     private fun buildTargetAction(raw: JsonElement?): TargetAction? {
         val ta = asObject(raw) ?: return null
-        return when (asString(ta["type"])) {
+        return when (val type = asString(ta["type"])) {
             "url_match" -> asString(ta["pattern"])?.let { TargetAction.UrlMatch(pattern = it) }
             "event_match" -> {
                 val props = asObject(ta["props"]) ?: return null
@@ -391,6 +449,14 @@ object ConfigValidator {
                     typed[k] = asString(v) ?: return null
                 }
                 TargetAction.EventMatch(props = typed)
+            }
+            "and", "or" -> {
+                val conditions = ta["conditions"] as? JsonArray ?: return null
+                val children = mutableListOf<TargetAction>()
+                for (child in conditions) {
+                    children += buildTargetAction(child) ?: return null
+                }
+                if (type == "and") TargetAction.And(children) else TargetAction.Or(children)
             }
             else -> null
         }

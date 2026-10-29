@@ -5,6 +5,7 @@ import java.util.UUID
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -91,6 +92,34 @@ class StudyStoreTests {
         assertFalse(json.containsKey("transactionId"))
         assertFalse(json.containsKey("enrollmentId"))
         assertFalse(json.containsKey("sessionId"))
+        assertFalse(json.containsKey("targetProgress"))
+    }
+
+    @Test
+    fun activeStudyTargetProgressRoundTripsAndLegacyRecordsDecodeNull() {
+        val store = makeStore()
+        val latchedAt = Instant.ofEpochSecond(1_700_000_123)
+        store.activeStudy = ActiveStudy(
+            code = "TESTCODE1234", config = sampleConfig(), targetProgress = mapOf("t.1" to latchedAt),
+        )
+        val reloaded = checkNotNull(makeStore().activeStudy)
+        assertEquals(mapOf("t.1" to latchedAt), reloaded.targetProgress)
+        assertEquals(setOf("t.1"), reloaded.latchedLeafIds)
+
+        // Persisted as { leafId: ISO } — the extension's storage shape.
+        val json = Json.parseToJsonElement(checkNotNull(kv.getString("activeStudy"))).jsonObject
+        assertEquals(
+            "2023-11-14T22:15:23Z",
+            json["targetProgress"]!!.jsonObject["t.1"]!!.jsonPrimitive.content,
+        )
+
+        // A record persisted before composite targets has no key — it must
+        // decode with null (≡ nothing latched).
+        kv.putString("activeStudy", JsonObject(json - "targetProgress").toString())
+        val legacy = checkNotNull(makeStore().activeStudy)
+        assertEquals("TESTCODE1234", legacy.code)
+        assertNull(legacy.targetProgress)
+        assertEquals(emptySet<String>(), legacy.latchedLeafIds)
     }
 
     @Test

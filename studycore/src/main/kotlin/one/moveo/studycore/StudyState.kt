@@ -39,6 +39,11 @@ data class ActiveStudy(
     /// Once per participant per study; never unset by later navigation.
     val targetFired: Boolean = false,
     val targetFiredAt: Instant? = null,
+    /// Latched targetAction leaves, `{ leafId: latchedAt }` (composite
+    /// targets, config-schema §4.3; extension `activeStudy.targetProgress`).
+    /// Leaf ids are positional paths into the tree ("t", "t.0", "t.1.0").
+    /// Absent on records written before composites existed ≡ empty.
+    val targetProgress: Map<String, Instant>? = null,
     /// Lead-in opened on the FIRST visit to a tracked origin (not enrollment).
     val leadInShownAt: Instant? = null,
     /// A pending lead-out survives an app kill: due-time is persisted, the
@@ -51,7 +56,12 @@ data class ActiveStudy(
     /// completion so the backend can link the enrollment to its tracking
     /// session (extension storage.js `activeStudy.sessionId`).
     val sessionId: String? = null,
-)
+) {
+    /// The latched leaf ids (`targetProgress` keys; absent ≡ none) — the set
+    /// the target tree is evaluated over.
+    val latchedLeafIds: Set<String>
+        get() = targetProgress?.keys ?: emptySet()
+}
 
 /// Local copy of the consent acceptance (the authoritative record is
 /// server-side via the enroll call).

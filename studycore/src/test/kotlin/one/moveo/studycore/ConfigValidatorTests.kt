@@ -1,6 +1,7 @@
 package one.moveo.studycore
 
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
@@ -40,7 +41,7 @@ class ConfigValidatorTests {
     @Test
     fun fixtureVerdicts() {
         val files = Fixtures.dir().listFiles { f -> f.extension == "json" }!!.sortedBy { it.name }
-        assertTrue(files.size >= 20)
+        assertTrue(files.size >= 30)
 
         for (file in files) {
             val name = file.name
@@ -416,6 +417,147 @@ class ConfigValidatorTests {
         assertNull(config.flow.targetAction)
     }
 
+    // MARK: - Composite targets (config-schema §4.3; run-tests.mjs §6b
+    // "Validator extras for composites" — fixtures cover the main shapes,
+    // these pin the boundaries)
+
+    private val tUrl: JsonObject = buildJsonObject {
+        put("type", "url_match")
+        put("pattern", "/checkout/*/success")
+    }
+    private val tBuy: JsonObject = buildJsonObject {
+        put("type", "event_match")
+        putJsonObject("props") { put("eA", "click"); put("eV", "Buy now") }
+    }
+    private val tPay: JsonObject = buildJsonObject {
+        put("type", "event_match")
+        putJsonObject("props") { put("eA", "click"); put("eV", "Pay now") }
+    }
+
+    private fun composite(type: String, vararg children: JsonElement): JsonObject = buildJsonObject {
+        put("type", type)
+        put("conditions", JsonArray(children.toList()))
+    }
+
+    private fun withTarget(targetAction: JsonElement): JsonObject {
+        val minimal = loadFixture("valid-minimal.json")
+        return JsonObject(minimal + ("flow" to buildJsonObject { put("targetAction", targetAction) }))
+    }
+
+    /// The typed target of a config that must validate (null ≡ treated as absent).
+    private fun validTarget(targetAction: JsonElement): TargetAction? =
+        validConfig(withTarget(targetAction)).flow.targetAction
+
+    /// The error list of a config that must NOT validate.
+    private fun targetErrors(targetAction: JsonElement): List<String> =
+        when (val result = ConfigValidator.validate(withTarget(targetAction))) {
+            is ConfigValidator.ValidationResult.Valid ->
+                throw AssertionError("expected invalid, got ${result.config.flow.targetAction}")
+            is ConfigValidator.ValidationResult.Invalid -> result.errors
+        }
+
+    private fun leaves(n: Int): Array<JsonElement> = Array(n) { tBuy }
+
+    private fun nest(depth: Int, leaf: JsonObject): JsonObject =
+        if (depth == 0) leaf else composite(if (depth % 2 == 1) "and" else "or", nest(depth - 1, leaf))
+
+    private val urlLeaf = TargetAction.UrlMatch(pattern = "/checkout/*/success")
+    private val buyLeaf = TargetAction.EventMatch(props = mapOf("eA" to "click", "eV" to "Buy now"))
+    private val payLeaf = TargetAction.EventMatch(props = mapOf("eA" to "click", "eV" to "Pay now"))
+
+    @Test
+    fun compositeNestedTreeAcceptedVerbatim() {
+        val nested = composite("and", tUrl, composite("or", tBuy, tPay))
+        assertEquals(TargetAction.And(listOf(urlLeaf, TargetAction.Or(listOf(buyLeaf, payLeaf)))), validTarget(nested))
+
+        val fixture = validConfig(loadFixture("valid-composite-nested.json"))
+        assertEquals(
+            TargetAction.And(listOf(
+                urlLeaf,
+                TargetAction.Or(listOf(
+                    TargetAction.EventMatch(props = mapOf("eA" to "click", "eT" to "button", "eV" to "Buy now")),
+                    TargetAction.EventMatch(props = mapOf("eA" to "click", "eT" to "button", "eV" to "Pay now")),
+                )),
+            )),
+            fixture.flow.targetAction,
+        )
+    }
+
+    @Test
+    fun compositeChildAndLeafCaps() {
+        assertEquals("single child ok", TargetAction.Or(listOf(urlLeaf)), validTarget(composite("or", tUrl)))
+        assertNotNull("10 children ok", validTarget(composite("or", *leaves(10))))
+        assertEquals(
+            "11 children rejected",
+            listOf("flow.targetAction.conditions: required non-empty array (1–10) for and/or"),
+            targetErrors(composite("or", *leaves(11))),
+        )
+        assertNotNull(
+            "10 leaves across tree ok",
+            validTarget(composite("and", composite("or", *leaves(5)), composite("or", *leaves(5)))),
+        )
+        assertEquals(
+            "11 leaves across tree rejected",
+            listOf("flow.targetAction: more than 10 leaf conditions (§4.3)"),
+            targetErrors(composite("and", composite("or", *leaves(6)), composite("or", *leaves(5)))),
+        )
+    }
+
+    @Test
+    fun compositeDepthCap() {
+        assertNotNull("depth 3 ok", validTarget(nest(3, tUrl)))
+        assertEquals(
+            "depth 4 rejected",
+            listOf("flow.targetAction.conditions[0].conditions[0].conditions[0]: nesting deeper than 3 composite levels (§4.3)"),
+            targetErrors(nest(4, tUrl)),
+        )
+    }
+
+    @Test
+    fun compositeUnknownNestedTypeNullsWholeTarget() {
+        val future = buildJsonObject { put("type", "future"); put("anything", 1) }
+        assertNull("nested unknown type → whole target null, config ok", validTarget(composite("and", tUrl, future)))
+        val fixture = validConfig(loadFixture("valid-composite-unknown-nested-type.json"))
+        assertNull(fixture.flow.targetAction)
+        val elementClick = buildJsonObject { put("type", "element_click"); put("selector", "#buy") }
+        assertNull("unknown root type still → null (pre-existing rule)", validTarget(elementClick))
+    }
+
+    @Test
+    fun compositeStructuralErrorsCarryThePath() {
+        val bogus = buildJsonObject { put("type", "event_match"); putJsonObject("props") { put("bogus", "x") } }
+        val errors = targetErrors(composite("and", tUrl, composite("or", bogus)))
+        assertTrue(
+            "$errors",
+            errors[0].startsWith("flow.targetAction.conditions[1].conditions[0].props: unknown key"),
+        )
+        assertEquals(
+            listOf("flow.targetAction.conditions[1]: must be an object"),
+            targetErrors(composite("and", tUrl, JsonPrimitive("click"))),
+        )
+        assertEquals(
+            listOf("flow.targetAction.conditions: required non-empty array (1–10) for and/or"),
+            targetErrors(composite("and")),
+        )
+        assertEquals(
+            "conditions must be an array",
+            listOf("flow.targetAction.conditions: required non-empty array (1–10) for and/or"),
+            targetErrors(buildJsonObject { put("type", "or"); put("conditions", tUrl) }),
+        )
+        val stars = buildJsonObject { put("type", "url_match"); put("pattern", "***") }
+        assertEquals(
+            "leaf rules apply at any depth",
+            listOf("flow.targetAction.conditions[0].pattern: must not be wildcards only (§4.1 — would fire on the first page visited)"),
+            targetErrors(composite("or", stars)),
+        )
+        assertEquals(
+            "root leaf error strings unchanged",
+            listOf("flow.targetAction.pattern: must not be wildcards only (§4.1 — would fire on the first page visited)"),
+            targetErrors(stars),
+        )
+        assertEquals(listOf("flow.targetAction: must be an object or null"), targetErrors(JsonPrimitive("nope")))
+    }
+
     @Test
     fun nonObjectConfigRejected() {
         assertFalse(isValid(JsonPrimitive("nope")))
@@ -447,6 +589,16 @@ class ConfigValidatorTests {
         val config = validConfig(loadFixture("valid-full.json"))
         val encoded = StudyCoreJson.encodeToString(StudyConfig.serializer(), config)
         assertEquals(config, StudyCoreJson.decodeFromString(StudyConfig.serializer(), encoded))
+
+        // Composite trees persist as { type, conditions } and decode back —
+        // the shape stored on the active study (ActiveStudy.config).
+        val nested = validConfig(loadFixture("valid-composite-nested.json"))
+        val encodedNested = StudyCoreJson.encodeToString(StudyConfig.serializer(), nested)
+        assertEquals(nested, StudyCoreJson.decodeFromString(StudyConfig.serializer(), encodedNested))
+        val nestedTree = kotlinx.serialization.json.Json.parseToJsonElement(encodedNested).jsonObject
+        val ta = nestedTree["flow"]!!.jsonObject["targetAction"]!!.jsonObject
+        assertEquals("and", ta["type"]!!.jsonPrimitive.content)
+        assertEquals(2, (ta["conditions"] as JsonArray).size)
 
         // excludeDetailedTracking null must round-trip as ABSENT, not false —
         // the injected payload relies on this to let the tag pick defaults.

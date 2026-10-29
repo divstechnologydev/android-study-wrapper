@@ -26,19 +26,21 @@ import kotlinx.serialization.json.putJsonObject
 object ScriptBuilder {
     /// Build the injected-script source. `yieldHosts` are hostnames where a
     /// site-own Moveo tag was detected (the app yields there from the next
-    /// load). `includeEventTarget` is true only while an event_match target
-    /// exists and has not fired — matching the bridge's "omitted once fired"
-    /// rule so post-completion loads carry zero matching overhead. url_match
-    /// targets never reach the page: they are evaluated natively.
+    /// load). `eventLeaves` are the event_match leaves of the target tree
+    /// still to be latched (`TargetMatch.unfiredEventLeaves`; empty once the
+    /// target fired) — matching the bridge's "omitted once every event leaf
+    /// has latched or the target has fired" rule so those loads carry zero
+    /// matching overhead. The tree itself and url_match leaves never reach
+    /// the page: they are evaluated natively.
     fun userScriptSource(
         config: StudyConfig,
         tagSource: String,
         bootstrapSource: String,
         yieldHosts: List<String>,
-        includeEventTarget: Boolean,
+        eventLeaves: List<TargetMatch.TargetLeaf>,
     ): String {
         val payloadJson = payloadJson(
-            config = config, yieldHosts = yieldHosts, includeEventTarget = includeEventTarget,
+            config = config, yieldHosts = yieldHosts, eventLeaves = eventLeaves,
         )
 
         return """(function () {
@@ -71,15 +73,17 @@ $bootstrapSource
     /// the yieldHosts map checked in the guard). Built as a JSON tree so
     /// absent optionals stay ABSENT in JSON — `exclude_detailed_tracking`
     /// omitted lets the tag apply its per-type default, `targetAction`
-    /// omitted means nothing to match.
+    /// omitted means nothing to match. `targetAction` is the bridge's
+    /// `{ leaves: [{ id, props }] }` — a flat list of unfired event leaves
+    /// with their positional ids, never the tree.
     private fun payloadJson(
         config: StudyConfig,
         yieldHosts: List<String>,
-        includeEventTarget: Boolean,
+        eventLeaves: List<TargetMatch.TargetLeaf>,
     ): String {
         val t = config.tracking
-        val target = (config.flow.targetAction as? TargetAction.EventMatch)
-            ?.takeIf { includeEventTarget }
+        // url leaves never reach the page — dropped even if passed in.
+        val leaves = eventLeaves.filterIsInstance<TargetMatch.TargetLeaf.Event>()
 
         val payload = buildJsonObject {
             put("token", t.token)
@@ -112,10 +116,14 @@ $bootstrapSource
             putJsonObject("yieldHosts") {
                 yieldHosts.map { it.lowercase() }.toSortedSet().forEach { put(it, true) }
             }
-            target?.let { tgt ->
+            if (leaves.isNotEmpty()) {
                 putJsonObject("targetAction") {
-                    put("type", "event_match")
-                    put("props", JsonObject(tgt.props.mapValues { JsonPrimitive(it.value) }))
+                    put("leaves", JsonArray(leaves.map { leaf ->
+                        buildJsonObject {
+                            put("id", leaf.id)
+                            put("props", JsonObject(leaf.props.mapValues { JsonPrimitive(it.value) }))
+                        }
+                    }))
                 }
             }
         }
