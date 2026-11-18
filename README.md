@@ -99,6 +99,35 @@ anything else is dropped, never blocks activation). It is sent as
 mints `enrollmentId` (`e_<uuid>`) once per activation, before the first
 enroll call, and reuses it on consent-screen retries.
 
+**Deferred setup (install referrer).** A participant who does not have the
+app yet opens the https link, lands on the landing page and installs from
+Google Play — which used to drop the code. The landing page now appends
+`referrer=moveo_code%3D<CODE>%26transaction_id%3D<ID>` to its Play Store
+link, and on the first launch after install the play build reads the Play
+Install Referrer once (`StoreSupport.fetchInstallReferrer`, 5 s cap),
+rebuilds `moveoone://config/<CODE>[?transaction_id=<ID>]`
+(`SetupLink.linkFromInstallReferrer`) and hands it to
+`AppViewModel.handleOpenUrl` — the same fetch → validate → consent path as a
+tapped link; nothing activates without the consent screen. Rules
+(`AppViewModel.checkDeferredLink`):
+
+- **Once per install.** The `deferredLinkConsumed` flag is written before the
+  referrer is read, found or not. It lives in its own SharedPreferences file
+  (`install.xml`) that is *not* in the Auto Backup / device-transfer rules,
+  so a reinstall restored from a backup checks again; leaving or finishing a
+  study never clears it.
+- **Only into an empty app.** Skipped when a study is active, an activation
+  is in progress, or a link opened the app — a tapped link always wins.
+- **Play only.** The huawei build has no install-referrer library and its
+  `StoreSupport` returns null (the landing page links only to Google Play;
+  AppGallery's own referrer is a separate task). The play build's merged
+  manifest gains the library's normal-level
+  `com.google.android.finsky.permission.BIND_GET_INSTALL_REFERRER_SERVICE`.
+- The referrer is only delivered for installs made through the Play Store
+  app, so the end-to-end check needs an internal-testing install from a
+  landing-page link; a sideloaded or `adb install`ed build reports no code
+  and logs `deferred link: no study code in the install referrer` (debug).
+
 App Links need two things:
 
 1. The manifest intent filter (`android:autoVerify="true"` for

@@ -58,9 +58,16 @@ class InMemoryParticipantIdStore(private var id: String? = null) : ParticipantId
 ///                      ownTagHosts     — {hostname: detectedAt} (yield map)
 ///                      apiBaseOverride — String (DEBUG/mock only)
 ///                      demoSite        — String (last site the demo ran on)
+///   install store:     deferredLinkConsumed — "1" once the install-referrer
+///                      check ran (NOT backed up, see `installStore`)
 class StudyStore(
     private val store: KeyValueStore,
     private val participantIdStore: ParticipantIdStore,
+    /// Facts about THIS install rather than about the participant or a
+    /// study. The app backs it with a SharedPreferences file that is left
+    /// out of Auto Backup / device transfer, so a reinstall restored from a
+    /// backup starts with it empty. Defaults to the main store (tests).
+    private val installStore: KeyValueStore = store,
 ) {
     private object Key {
         const val ACTIVE_STUDY = "activeStudy"
@@ -69,6 +76,7 @@ class StudyStore(
         const val OWN_TAG_HOSTS = "ownTagHosts"
         const val API_BASE_OVERRIDE = "apiBaseOverride"
         const val DEMO_SITE = "demoSite"
+        const val DEFERRED_LINK_CONSUMED = "deferredLinkConsumed"
     }
 
     private val ownTagHostsSerializer = MapSerializer(String.serializer(), InstantIso8601Serializer)
@@ -105,6 +113,13 @@ class StudyStore(
     var demoSite: String?
         get() = store.getString(Key.DEMO_SITE)
         set(value) = store.putString(Key.DEMO_SITE, value)
+
+    /// The deferred setup-link check (install referrer, plan §a1.5) already
+    /// ran on this install — set whether or not a code was found. Not study
+    /// state: leaving or finishing a study never clears it.
+    var deferredLinkConsumed: Boolean
+        get() = installStore.getString(Key.DEFERRED_LINK_CONSUMED) != null
+        set(value) = installStore.putString(Key.DEFERRED_LINK_CONSUMED, if (value) "1" else null)
 
     fun participantId(): String = participantIdStore.getOrCreate()
 

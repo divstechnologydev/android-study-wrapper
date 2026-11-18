@@ -21,6 +21,7 @@ class App : Application() {
             store = StudyStore(
                 store = PrefsKeyValueStore(this),
                 participantIdStore = PrefsParticipantIdStore(this),
+                installStore = PrefsKeyValueStore(this, PrefsKeyValueStore.INSTALL_FILE),
             ),
             appVersion = BuildConfig.VERSION_NAME,
             isDebugBuild = BuildConfig.DEBUG,
@@ -39,6 +40,10 @@ class App : Application() {
             // CSP relay parity capture — the event spy in debug, null in
             // release (the release DebugHooks defines it as null).
             relayedEventsObserver = DebugHooks.relayedEventsObserver,
+            // Deferred setup link (§a1.5): the store that installed the app
+            // may hand over the study code the install dropped. Play only;
+            // the huawei StoreSupport returns null.
+            installReferrer = { StoreSupport.fetchInstallReferrer(this) },
         )
     }
 

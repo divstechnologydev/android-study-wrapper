@@ -103,6 +103,10 @@ dependencies {
     implementation(libs.androidx.webkit)
     implementation(libs.androidx.browser)
 
+    // Deferred setup link (docs/plan.md §a1.5): Play Install Referrer, used
+    // only by src/play StoreSupport. The huawei binary must not contain it.
+    "playImplementation"(libs.installreferrer)
+
     implementation(platform(libs.compose.bom))
     implementation(libs.compose.ui)
     implementation(libs.compose.material3)

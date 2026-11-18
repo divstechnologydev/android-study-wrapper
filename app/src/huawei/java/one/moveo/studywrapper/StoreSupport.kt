@@ -1,5 +1,7 @@
 package one.moveo.studywrapper
 
+import android.content.Context
+
 /// HUAWEI flavor: the only store-specific facts in the binary (§h1). Must
 /// not reference Google Play — AppGallery review rejects apps that direct
 /// users there, and on GMS-less devices the engine is not the Play-updated
@@ -16,4 +18,9 @@ object StoreSupport {
             "engine from AppGallery) and try again."
     val webViewUpdateActionLabel: String? = null
     val webViewUpdateActionUrl: String? = null
+
+    /// Deferred setup link (§a1.5): the landing page links only to Google
+    /// Play on Android, so there is no AppGallery referrer to read.
+    @Suppress("UNUSED_PARAMETER", "RedundantSuspendModifier")
+    suspend fun fetchInstallReferrer(context: Context): String? = null
 }

@@ -42,7 +42,12 @@ class MainActivity : ComponentActivity() {
         // A recreated activity (process death, configuration change) gets
         // the original launch intent again — the model already consumed it,
         // so only a fresh instance handles it.
-        if (savedInstanceState == null) handleIntent(intent)
+        if (savedInstanceState == null) {
+            handleIntent(intent)
+            // Deferred setup link (§a1.5): once per install, and only after
+            // the launch intent — a link that opened the app always wins.
+            model.checkDeferredLink()
+        }
         setContent {
             // Brand kit v3 is light-only (near-black on warm neutrals) — same
             // as the extension pages and the platform; pinning the scheme

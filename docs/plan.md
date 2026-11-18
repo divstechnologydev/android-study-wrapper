@@ -203,6 +203,25 @@ badge + Play deep link for Android user agents. Owned by the platform repo;
 this app only depends on it. The "Open in app" button must forward
 `?transaction_id=` verbatim (a1.4).
 
+### a1.5 Deferred setup link (Play Install Referrer)
+
+A participant without the app installs it from the landing page's Google
+Play button; the store install used to drop the code and the transaction
+id. The landing page passes `referrer=moveo_code=<CODE>[&transaction_id=<ID>]`
+on the Play Store link (platform repo, task 15); the play build reads the
+install referrer once on first launch, rebuilds
+`moveoone://config/<CODE>[?transaction_id=<ID>]` and runs it through
+`handleOpenUrl` (fetch → validate → consent, no new trust). Once per
+install (flag in a non-backed-up prefs file), only into an empty app, a
+tapped link always wins. Store-specific code stays in `StoreSupport`
+(§h1): the library is `playImplementation` only and the huawei
+`fetchInstallReferrer` returns null. Details: README "Setup links".
+*Status 2026-11-18: implemented — `SetupLink.linkFromInstallReferrer` (8
+studycore tests), `AppViewModel.checkDeferredLink` (8 app JVM tests),
+both release flavors build, huawei dex free of the library. **Not yet
+verified end to end** — needs the landing-page change deployed and a Play
+internal-testing install from a referrer link.*
+
 ### a1.4 Link-first activation, transaction id, client enrollment id
 
 Port of the iOS `transactions-track` branch / extension `enrollment-id`
@@ -620,7 +639,9 @@ code/build work; h3 is store admin (slow — start early); h4 rides with a1.
 - The only per-store facts live in a per-flavor `StoreSupport` object
   (`src/play` / `src/huawei`, same pattern as the `DebugHooks`
   debug/release split): the WebView-update gate's wording plus an optional
-  store link. Nothing else may branch on store.
+  store link, and the install-referrer read for the deferred setup link
+  (§a1.5 — Play library in `src/play` only). Nothing else may branch on
+  store.
 - The huawei binary must not contain Google Play URLs (AppGallery review
   rejects apps that direct users to Google Play); the Play deep link exists
   only in `src/play`. On GMS-less devices the WebView provider is not

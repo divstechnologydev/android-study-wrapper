@@ -64,6 +64,10 @@ class AppViewModel(
     /// Wall clock for every persisted timestamp and the lead-out due check;
     /// injected so JVM tests can advance it in step with virtual time.
     private val now: () -> Instant = { Instant.now() },
+    /// Deferred setup link (§a1.5): reads the raw install referrer from the
+    /// store that installed the app (`StoreSupport.fetchInstallReferrer`),
+    /// or null. Null seam = no deferred check (tests, previews).
+    private val installReferrer: (suspend () -> String?)? = null,
 ) {
     data class PendingActivation(
         val code: String,
@@ -208,6 +212,7 @@ class AppViewModel(
     /// panel-provider transaction id.
     fun handleOpenUrl(url: String) {
         val link = SetupLink.parse(url) ?: return
+        linkHandled = true
         // Codes/ids only — never the token or config (security §6); debug
         // builds only (null sink in release).
         debugLog?.invoke(
@@ -244,6 +249,57 @@ class AppViewModel(
         // under the study browser's full-screen cover.
         _browserPresented.value = false
         activate()
+    }
+
+    /// A setup link was handled in this process — the deferred check must
+    /// not override it, whatever became of that activation since.
+    private var linkHandled = false
+
+    /// Nothing is going on that a recovered link would interrupt.
+    private val idleAndEmpty: Boolean
+        get() = store.activeStudy == null && _phase.value == Phase.Idle &&
+            !linkHandled && codeInput.value.isBlank()
+
+    /// Deferred setup link (§a1.5): a participant who installed the app from
+    /// the landing page's store button gets the study code the install
+    /// dropped. Runs at most once per install — the flag is persisted before
+    /// anything that can fail, found or not — and only when the app is
+    /// empty: an active study, an activation in progress or a link that
+    /// opened the app all win. The recovered link is handled exactly like a
+    /// tapped one (fetch → validate → consent); nothing activates here.
+    fun checkDeferredLink() {
+        if (store.deferredLinkConsumed) return
+        scope.launch { checkDeferredLinkNow() }
+    }
+
+    suspend fun checkDeferredLinkNow() {
+        if (store.deferredLinkConsumed) return
+        store.deferredLinkConsumed = true
+        val fetch = installReferrer ?: return
+        if (!idleAndEmpty) {
+            debugLog?.invoke("deferred link: skipped, app not empty")
+            return
+        }
+        val referrer = try {
+            fetch()
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            null
+        }
+        // Never the raw referrer — handleOpenUrl logs the code and id.
+        val link = SetupLink.linkFromInstallReferrer(referrer)
+        if (link == null) {
+            debugLog?.invoke("deferred link: no study code in the install referrer")
+            return
+        }
+        // The fetch took a moment: a link or a typed code may have arrived.
+        if (!idleAndEmpty) {
+            debugLog?.invoke("deferred link: skipped, app not empty")
+            return
+        }
+        debugLog?.invoke("deferred link: recovered from the install referrer")
+        handleOpenUrl(link)
     }
 
     private data class ResolvedInput(val code: String, val transactionId: String?)
