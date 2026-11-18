@@ -94,6 +94,11 @@ object Brand {
     /// Button-press pressed danger fill / danger label (iOS literals).
     val dangerPressed = Color(0xFF983E30)
     val dangerLabel = Color(0xFFFAFAF8)
+
+    /// The study browser's Done pill — a solid green in the family of the
+    /// success pair, saturated enough to carry a white label (Android-only).
+    val doneSolid = Color(0xFF2F7D4E)
+    val doneLabel = Color(0xFFFFFFFF)
 }
 
 // MARK: - Type treatments
