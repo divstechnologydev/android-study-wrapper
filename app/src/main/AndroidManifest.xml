@@ -4,6 +4,14 @@
     <!-- Config fetch + enroll + the study WebView. -->
     <uses-permission android:name="android.permission.INTERNET" />
 
+    <!-- The portrait lock on MainActivity is a preference, not a hardware
+         requirement. Without this, the build tools imply screen.portrait as
+         REQUIRED and Play filters out devices that don't declare it
+         (docs/a4-play-release.md R13). -->
+    <uses-feature
+        android:name="android.hardware.screen.portrait"
+        android:required="false" />
+
     <!-- Package visibility (API 30+): resolve browsers / Custom Tabs
          providers for lead surveys and externalized links (§a2.5–a2.6). -->
     <queries>
