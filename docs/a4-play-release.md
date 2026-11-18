@@ -105,6 +105,13 @@ Companion docs: [plan §a4](plan.md), [assetlinks-handoff.md](assetlinks-handoff
   consent card is `widthIn(max = 560.dp)` so it centres. Tablets are not
   a target form factor for v1 — accept the "not optimised for tablets"
   listing note.
+  **Correction 2026-11-18:** the lock *is* a Play availability issue — it
+  makes the build tools imply `android.hardware.screen.portrait` as a
+  required feature, and Play Console flags the release ("Required
+  hardware feature declarations are restricting your app's
+  availability"). Fixed by declaring the feature
+  `android:required="false"` in the main manifest; the lock itself stays.
+  Verify with `aapt2 dump badging` → `uses-feature-not-required`.
 - [x] **R14 — lint noise.** (done 2026-08-28) `@SuppressLint("RequiresFeature")`
   on the three gated `StudyWebView` methods; `app/lint.xml` ignores
   `ObsoleteSdkInt` on `mipmap-anydpi-v26` (false positive — AAPT rejects
