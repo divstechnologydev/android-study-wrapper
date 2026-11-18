@@ -28,8 +28,8 @@ android {
         applicationId = "one.moveo.studywrapper"
         minSdk = 26
         targetSdk = 36
-        versionCode = 4
-        versionName = "0.1.3"
+        versionCode = 5
+        versionName = "0.1.4"
         // Instrumented tests: the CSP-relay smoke test (scripts/relay-smoke.sh).
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -102,6 +102,10 @@ dependencies {
     implementation(libs.androidx.lifecycle.viewmodel.compose)
     implementation(libs.androidx.webkit)
     implementation(libs.androidx.browser)
+
+    // Deferred setup link (docs/plan.md §a1.5): Play Install Referrer, used
+    // only by src/play StoreSupport. The huawei binary must not contain it.
+    "playImplementation"(libs.installreferrer)
 
     implementation(platform(libs.compose.bom))
     implementation(libs.compose.ui)

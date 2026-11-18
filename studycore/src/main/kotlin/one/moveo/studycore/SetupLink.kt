@@ -2,6 +2,7 @@ package one.moveo.studycore
 
 import java.net.URI
 import java.net.URLDecoder
+import java.net.URLEncoder
 
 /// Extracts a study code (and the optional panel-provider transaction id)
 /// from the app's two entry-point URL shapes:
@@ -74,15 +75,56 @@ object SetupLink {
         val beforeFragment = url.substringBefore('#')
         val q = beforeFragment.indexOf('?')
         if (q < 0) return null
-        for (pair in beforeFragment.substring(q + 1).split('&')) {
+        return TransactionId.normalize(queryValue(beforeFragment.substring(q + 1), TRANSACTION_ID_PARAM))
+    }
+
+    /// Install-referrer parameter carrying the study code (deferred setup,
+    /// docs/plan.md §a1.5). The landing page puts
+    /// `moveo_code=<CODE>[&transaction_id=<ID>]` in the Play Store link's
+    /// `referrer`.
+    const val REFERRER_CODE_PARAM = "moveo_code"
+
+    /// Rebuilds the setup link a store install dropped: the install referrer
+    /// read as a query string → `moveoone://config/<CODE>[?transaction_id=<ID>]`,
+    /// or null when it carries no `moveo_code` (organic installs report
+    /// `utm_source=google-play&utm_medium=organic`). Presence only — the
+    /// values are untrusted and get validated by `parse` when the link is
+    /// handled, like any tapped link. An undecodable transaction id is
+    /// dropped rather than losing the code.
+    fun linkFromInstallReferrer(referrer: String?): String? {
+        if (referrer.isNullOrBlank()) return null
+        linkFromReferrerQuery(referrer)?.let { return it }
+        // A store that hands the value over still percent-encoded has no
+        // literal `=` at all — decode once and read it again.
+        if ('=' in referrer) return null
+        return decode(referrer)?.let { linkFromReferrerQuery(it) }
+    }
+
+    private fun linkFromReferrerQuery(query: String): String? {
+        val code = queryValue(query, REFERRER_CODE_PARAM)?.takeIf { it.isNotBlank() } ?: return null
+        val transactionId = queryValue(query, TRANSACTION_ID_PARAM)?.takeIf { it.isNotEmpty() }
+        return buildString {
+            append("moveoone://config/").append(encode(code))
+            if (transactionId != null) {
+                append('?').append(TRANSACTION_ID_PARAM).append('=').append(encode(transactionId))
+            }
+        }
+    }
+
+    /// First occurrence of `name` in a query string, percent-decoded; null
+    /// when absent or undecodable.
+    private fun queryValue(query: String, name: String): String? {
+        for (pair in query.split('&')) {
             val eq = pair.indexOf('=')
-            val name = if (eq < 0) pair else pair.substring(0, eq)
-            if (decode(name) != TRANSACTION_ID_PARAM) continue
-            val raw = if (eq < 0) "" else pair.substring(eq + 1)
-            return TransactionId.normalize(decode(raw))
+            val key = if (eq < 0) pair else pair.substring(0, eq)
+            if (decode(key) != name) continue
+            return decode(if (eq < 0) "" else pair.substring(eq + 1))
         }
         return null
     }
+
+    private fun encode(component: String): String =
+        URLEncoder.encode(component, "UTF-8").replace("+", "%20")
 
     private fun decode(component: String): String? = try {
         URLDecoder.decode(component, "UTF-8")
