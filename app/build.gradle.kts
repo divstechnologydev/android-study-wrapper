@@ -28,8 +28,8 @@ android {
         applicationId = "one.moveo.studywrapper"
         minSdk = 26
         targetSdk = 36
-        versionCode = 4
-        versionName = "0.1.3"
+        versionCode = 5
+        versionName = "0.1.4"
         // Instrumented tests: the CSP-relay smoke test (scripts/relay-smoke.sh).
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
