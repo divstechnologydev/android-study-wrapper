@@ -5,17 +5,23 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
+import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
@@ -88,8 +94,26 @@ fun StudyBrowserScreen(model: AppViewModel, study: ActiveStudy) {
                 .padding(horizontal = 4.dp, vertical = 2.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            TextButton(onClick = { confirmingFinish = true }) {
-                Text("Done", color = Brand.text, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+            // Done is the screen's primary action (finish the study), so it is
+            // the one filled control in the chrome: solid green pill with a
+            // check, against the quiet grey icons around it.
+            TextButton(
+                onClick = { confirmingFinish = true },
+                modifier = Modifier.padding(start = 6.dp, end = 4.dp).height(34.dp),
+                shape = RoundedCornerShape(Brand.radiusMD),
+                colors = ButtonDefaults.textButtonColors(
+                    containerColor = Brand.doneSolid,
+                    contentColor = Brand.doneLabel,
+                ),
+                contentPadding = PaddingValues(start = 10.dp, end = 14.dp),
+            ) {
+                Icon(
+                    Icons.Outlined.Check,
+                    contentDescription = null,
+                    modifier = Modifier.size(16.dp),
+                )
+                Spacer(Modifier.width(6.dp))
+                Text("Done", fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
             }
             IconButton(onClick = { controller.goBackIfPossible() }, modifier = Modifier.size(40.dp)) {
                 Icon(
